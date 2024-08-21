@@ -1,0 +1,99 @@
+---
+title: "DADA2_STJ_SCTLD_Timeseries_Decontam"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("decontam")
+
+library(decontam); packageVersion("decontam")
+library(ggplot2); packageVersion("ggplot2")
+library("readr")
+
+
+```
+
+```{r}
+setwd("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code")
+
+```
+
+
+```{r}
+load("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/otus_STJSCTLD_final.RData")
+
+meta <- read.csv("meta_table.csv", header = TRUE)
+meta <- meta[1:164, 1:16]
+
+taxonomy <- read.delim("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/taxonomy_STJSCTLD_final.txt")
+
+ASVsequence <- read.delim("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/ASVsequences_STJSCTLD_final.txt")
+
+```
+
+
+```{r}
+#How many negative controls are there?
+sum(meta$Sample_Type == "Control") 
+#20
+```
+
+
+```{r}
+contam <- isContaminant(otus, neg=meta$Sample_Type %in% "Control", method="prevalence")
+
+```
+
+save(contam, file="~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/contam.RData")
+
+```{r}
+# We will now augment the contam data.frame with some additional annotations
+# This is some base R manipulation -- if you are not R familiar, that's OK.
+### Make a map between short ASV names and the full sequences
+sq <- colnames(otus)
+names(sq) <- paste0("ASV", seq_along(sq))
+if(!identical(colnames(otus), rownames(contam))) stop("Mismatch between st and contam.")
+### Add some taxonomic information to the data.frame
+contam$Phylum <- taxonomy[,"Phylum"]
+contam$Genus <- taxonomy[,"Genus"]
+contam$ASV <- names(sq)
+rownames(contam) <- NULL # To avoid printing long sequences
+### Add a column with binned prevalances
+contam$Prevalence_Binned <- cut(contam$prev, c(0, 10, 25, 45, 9999), labels=c("1-10", "11-25", "26-45", "45+"))
+### View
+head(contam)
+```
+
+
+```{r}
+# The decontam manuscript emphasizes inspection of the score assigned by decontam ($p)
+#   to identify an appropriate classification threshold. Ideally, there will be an evident
+#   high-score (non-contaminant) mode, and a low-score (contaminant) mode.
+# Inspect the histrogram of the scores to look for this bimodality, and help choose a classification threshold.
+histo <- ggplot(data=contam, aes(x=p)) + 
+  labs(x = 'decontam-prevalence Score', y='Number of ASVs') + 
+  geom_histogram(binwidth=0.02)
+
+# In the decontam manuscript (https://doi.org/10.1186/s40168-018-0605-2) the distribution
+#    of scores was also investigated after stratification by prevalene, i.e. taxa present
+#    in more or fewer samples.
+histo + facet_wrap(~Prevalence_Binned)
+```
+
+
+```{r}
+# Inspecting sequences at the extremes of the score distribution can help guide
+#   choices about classification.
+# Let's look more closely at the 10 highest cores (the 10 most non-contaminant according to decontam)
+i.top10 <- order(contam$p, decreasing=TRUE)[1:10]
+contam[i.top10,]
+```
+
+
+
+
