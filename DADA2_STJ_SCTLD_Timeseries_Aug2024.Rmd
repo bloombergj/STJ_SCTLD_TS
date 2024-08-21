@@ -1,0 +1,843 @@
+---
+title: "DADA2_STJ_SCTLD_Timeseries_Aug2024"
+author: "JeanneBloomberg"
+date: "8/12/24"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Note on using HPC and adjusting setting of sbatch: 
+If I want to edit the slurm run parameters, I can add them in the command line to override the ones in the .sh file:
+sbatch --cpus-per-task=4 --mem=32gb --time=03:10:00 /proj/omics/bioinfo/scripts/slurm/singularity_launch_rstudio.sh
+
+Check active job using: sacct
+
+#Background: 
+This is for the STJ SCTLD Time Sereies project (aka the Disease Wheels for the UVI team). I have coral samples and water samples from three different libraries: J1, N2, V2. The files I need are already combined into one folder, which I did manually on my local computer. I will run error rates for each unique library and PCR condition combinations, which will be six error rates in total: one for water and one for coral for each of the three libraries. 
+
+#Set up
+```{r setup, include=FALSE}
+setwd("~/STJ_SCTLD_TS_dada2")
+```
+
+```{r cars}
+#install.packages("devtools")    
+#devtools::install_github("benjjneb/dada2")
+library(dada2)
+
+#install.packages("dplyr")
+library(dplyr)
+
+#install.packages("data.table")
+library(data.table)
+
+```
+
+##################################################################################################################
+
+Define the following path variable so that it points to the extracted directory on your machine:
+```{r}
+path <-  "~/STJ_SCTLD_TS_dada2/FastQ_Data" 
+#CHANGE ME to the directory containing the fastq files after unzipping.
+
+#TOTAL READS using "zcat *fastq.gz | echo $((`wc -l`/4))":
+```
+
+Count the number of files
+Note -- you can count the number of files in a directory in unix with: "ls -1 | wc -l"
+```{r}
+list.files(path)
+length(list.files(path))
+  #436 -- perfect bc there are 218 samples, and 218*2=436
+
+```
+
+If the package successfully loaded and your listed files match those here, you are ready to go through the DADA2 pipeline.
+
+------------------
+
+I want the learnError model to run on unique PCR conditions within unique sequence runs. In my meta table, I have a column "LearnErr_ID" which identifies unique learnError models to run for which samples (rows). 
+
+I got the following code from: https://people.ucsc.edu/~claraqin/process-16s-sequences.html
+
+```{r}
+meta <- read.csv("meta_table_learnerror.csv", header = TRUE)
+meta <- meta[1:218, 1:6]
+
+#Make data frames for each error rate group
+unique_runs <- sort(unique(meta$LearnErr_ID))
+meta_1run <- meta[which(meta$LearnErr_ID==unique_runs[1]),]
+nrow(meta_1run)#23
+
+meta_2run <- meta[which(meta$LearnErr_ID==unique_runs[2]),]
+nrow(meta_2run) #23
+
+meta_3run <- meta[which(meta$LearnErr_ID==unique_runs[3]),]
+nrow(meta_3run) #53
+
+meta_4run <- meta[which(meta$LearnErr_ID==unique_runs[4]),]
+nrow(meta_4run) #65
+
+meta_5run <- meta[which(meta$LearnErr_ID==unique_runs[5]),]
+nrow(meta_5run) #26
+
+meta_6run <- meta[which(meta$LearnErr_ID==unique_runs[6]),]
+nrow(meta_6run) #28
+
+#make sure I have all my samples covered:
+nrow(meta_1run) + nrow(meta_2run) + nrow(meta_3run) + nrow(meta_4run) + nrow(meta_5run) + nrow(meta_6run) 
+#218, so I'm good!
+
+```
+
+
+Now we read in the names of the fastq files, and perform some string manipulation to get matched lists of the forward and reverse fastq files.
+```{r}
+# Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
+
+
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+
+# Because I have underscores in my basename, I needed to change the code from the tutorial, which I had ChatGpt do. 
+  # From tutorial: sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+
+#ChatGPT explanation of the following code: 
+  #This code splits the basename using "_" and then concatenates the first and second elements with "_" as the separator. If there is only one element in the split result, it returns that element as is.
+
+sample.names1 <- sapply(strsplit(basename(fnFs[1:30]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
+sample.names2 <- sapply(strsplit(basename(fnFs[31:32]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], x[3], sep = "_"), x))
+sample.names3 <- sapply(strsplit(basename(fnFs[33:42]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
+sample.names4 <- sapply(strsplit(basename(fnFs[43:95]), "_"), `[`, 1)
+sample.names5 <- sapply(strsplit(basename(fnFs[96:101]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
+sample.names6 <- sapply(strsplit(basename(fnFs[102:103]), "_"), `[`, 1)
+sample.names7 <- sapply(strsplit(basename(fnFs[104]), "-"), `[`, 1)
+sample.names8 <- sapply(strsplit(basename(fnFs[105:168]), "_"), `[`, 1)
+sample.names9 <-  sapply(strsplit(basename(fnFs[169:215]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
+sample.names10 <-  sapply(strsplit(basename(fnFs[216:218]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], x[3], sep = "_"), x))
+
+sample.names <-c(sample.names1, sample.names2, sample.names3, sample.names4, sample.names5, sample.names6, sample.names7, sample.names8, sample.names9, sample.names10 )
+length(sample.names) #218
+
+write.csv(sample.names, file = "sample_names.csv")
+#sample.names <- read.csv("sample_names.csv")
+```
+
+
+Make sample.names and fnFs & fnRs for each PCR/sequence conditions
+```{r}
+#this pulls out the sample names for each learn error rate
+sample.names_1run <- meta_1run$Sample_names[which(
+  meta_1run$Sample_names %in% sample.names )]
+
+sample.names_2run <- meta_2run$Sample_names[which(
+  meta_2run$Sample_names %in% sample.names )]
+
+sample.names_3run <- meta_3run$Sample_names[which(
+  meta_3run$Sample_names %in% sample.names )]
+
+sample.names_4run <- meta_4run$Sample_names[which(
+  meta_4run$Sample_names %in% sample.names )]
+
+sample.names_5run <- meta_5run$Sample_names[which(
+  meta_5run$Sample_names %in% sample.names )]
+
+sample.names_6run <- meta_6run$Sample_names[which(
+  meta_6run$Sample_names %in% sample.names )]
+
+
+###  fnFs
+# This matches the sample names to the sequences in fnFs/fnRs to make unique fnFs/fnRs for each learn error rate
+
+Pattern = paste(sample.names_1run, collapse="|")
+dat <- data.table(fnFs, result=grepl(Pattern, fnFs))
+fnFs_1run <- dat[dat$result == TRUE,1]
+fnFs_1run <- unlist(fnFs_1run[,1])
+length(fnFs_1run) #23
+
+Pattern = paste(sample.names_2run, collapse="|")
+dat <- data.table(fnFs, result=grepl(Pattern, fnFs))
+fnFs_2run<- dat[dat$result == TRUE,1]
+fnFs_2run <- unlist(fnFs_2run[,1])
+length(fnFs_2run) #23
+ 
+Pattern = paste(sample.names_3run, collapse="|")
+dat <- data.table(fnFs, result=grepl(Pattern, fnFs))
+fnFs_3run<- dat[dat$result == TRUE,1]
+fnFs_3run <- unlist(fnFs_3run[,1])
+length(fnFs_3run) #53
+
+Pattern = paste(sample.names_4run, collapse="|")
+dat <- data.table(fnFs, result=grepl(Pattern, fnFs))
+fnFs_4run<- dat[dat$result == TRUE,1]
+fnFs_4run <- unlist(fnFs_4run[,1])
+length(fnFs_4run) #65
+
+Pattern = paste(sample.names_5run, collapse="|")
+dat <- data.table(fnFs, result=grepl(Pattern, fnFs))
+fnFs_5run<- dat[dat$result == TRUE,1]
+fnFs_5run <- unlist(fnFs_5run[,1])
+length(fnFs_5run) #26
+
+Pattern = paste(sample.names_6run, collapse="|")
+dat <- data.table(fnFs, result=grepl(Pattern, fnFs))
+fnFs_6run<- dat[dat$result == TRUE,1]
+  #there are 30 in this list --> because it matched "Mock_positive" and "MockEven" to mock, so I need to manually take them out
+fnFs_6run <- fnFs_6run[-3,]
+fnFs_6run <- fnFs_6run[-4,]
+fnFs_6run <- unlist(fnFs_6run[,1])
+length(fnFs_6run) #28 --> great!
+
+length(fnFs_1run) + length(fnFs_2run) + length(fnFs_3run) + length(fnFs_4run) + length(fnFs_5run) + length(fnFs_6run) #218! great!
+
+#check formatting
+head(fnFs)
+head(fnFs_1run)
+
+intersect(fnFs_2run, fnFs_3run) #none
+intersect(fnFs_1run, fnFs_3run) #none
+intersect(fnFs_4run, fnFs_3run) #none
+intersect(fnFs_5run, fnFs_3run) #none
+intersect(fnFs_6run, fnFs_3run) #none
+
+
+###  fnRs
+
+Pattern = paste(sample.names_1run, collapse="|")
+dat <- data.table(fnRs, result=grepl(Pattern, fnRs))
+fnRs_1run<- dat[dat$result == TRUE,1]
+fnRs_1run <- unlist(fnRs_1run[,1])
+length(fnRs_1run) #23
+
+Pattern = paste(sample.names_2run, collapse="|")
+dat <- data.table(fnRs, result=grepl(Pattern, fnRs))
+fnRs_2run<- dat[dat$result == TRUE,1]
+fnRs_2run <- unlist(fnRs_2run[,1])
+length(fnRs_2run) #23
+
+Pattern = paste(sample.names_3run, collapse="|")
+dat <- data.table(fnRs, result=grepl(Pattern, fnRs))
+fnRs_3run<- dat[dat$result == TRUE,1]
+fnRs_3run <- unlist(fnRs_3run[,1])
+length(fnRs_3run) #53
+
+Pattern = paste(sample.names_4run, collapse="|")
+dat <- data.table(fnRs, result=grepl(Pattern, fnRs))
+fnRs_4run<- dat[dat$result == TRUE,1]
+fnRs_4run <- unlist(fnRs_4run[,1])
+length(fnRs_4run) #65
+
+Pattern = paste(sample.names_5run, collapse="|")
+dat <- data.table(fnRs, result=grepl(Pattern, fnRs))
+fnRs_5run<- dat[dat$result == TRUE,1]
+fnRs_5run <- unlist(fnRs_5run[,1])
+length(fnRs_5run) #26
+
+Pattern = paste(sample.names_6run, collapse="|")
+dat <- data.table(fnRs, result=grepl(Pattern, fnRs))
+fnRs_6run<- dat[dat$result == TRUE,1]
+  #there are 30 in this list again, same fix as above
+fnRs_6run <- fnRs_6run[-3,]
+fnRs_6run <- fnRs_6run[-4,]
+fnRs_6run <- unlist(fnRs_6run[,1])
+length(fnRs_6run) #28
+
+length(fnRs_1run) + length(fnRs_2run) + length(fnRs_3run) + length(fnRs_4run) + length(fnRs_5run) + length(fnRs_6run) #218 great!
+
+#check formatting
+head(fnRs)
+head(fnRs_1run)
+
+```
+
+
+##################################################################################################################
+Inspect read quality profiles
+
+We start by visualizing the quality profiles of the forward reads:
+```{r}
+#good to look at a few different types of samples to see the read qualities
+plotQualityProfile(fnFs[49:50]) #coral from Library J1, cut off about 10 --> some aren't as good, but not a total fall off in quality
+plotQualityProfile(fnFs[35:36]) #coral from Library N1, cut off about 10 
+plotQualityProfile(fnFs[4:5]) #coral from Library V2, cut off about 10
+
+plotQualityProfile(fnFs[120:121]) #seawater from Library J1, cut off about 10
+plotQualityProfile(fnFs[182:183]) #seawater from Library N2, cut off about 10
+plotQualityProfile(fnFs[203:204]) #seawater from Library V2, cut off about 10
+
+```
+Decision: Cut of 10 based on forward reads at position 240. 
+
+
+Now we visualize the quality profile of the reverse reads:
+```{r}
+plotQualityProfile(fnRs[49:50]) #coral from Library J1, cut off about 25
+plotQualityProfile(fnRs[35:36]) #coral from Library N1, cut off about 30
+plotQualityProfile(fnRs[4:5]) #coral from Library V2, cut off about 30-50
+
+plotQualityProfile(fnRs[120:121]) #seawater from Library J1, cut off about 10
+plotQualityProfile(fnRs[182:183]) #seawater from Library N2, cut off about 15
+plotQualityProfile(fnRs[203:204]) #seawater from Library V2, cut off about 25
+```
+Decision: Cut of 30 based on forward reads at position 220.
+
+
+
+###########################################################################################################
+Filter and trim
+
+Assign the filenames for the filtered fastq.gz files.
+```{r}
+# Place filtered files in filtered/ subdirectory
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+
+
+# make filtFs and filtRs for each sequencing run
+filtFs_1run <- file.path(path, "filtered", paste0(sample.names_1run, "_F_filt.fastq.gz"))
+filtRs_1run <- file.path(path, "filtered", paste0(sample.names_1run, "_R_filt.fastq.gz"))
+names(filtFs_1run) <- sample.names_1run
+names(filtRs_1run) <- sample.names_1run
+
+filtFs_2run <- file.path(path, "filtered", paste0(sample.names_2run, "_F_filt.fastq.gz"))
+filtRs_2run <- file.path(path, "filtered", paste0(sample.names_2run, "_R_filt.fastq.gz"))
+names(filtFs_2run) <- sample.names_2run
+names(filtRs_2run) <- sample.names_2run
+
+filtFs_3run <- file.path(path, "filtered", paste0(sample.names_3run, "_F_filt.fastq.gz"))
+filtRs_3run <- file.path(path, "filtered", paste0(sample.names_3run, "_R_filt.fastq.gz"))
+names(filtFs_3run) <- sample.names_3run
+names(filtRs_3run) <- sample.names_3run
+
+filtFs_4run <- file.path(path, "filtered", paste0(sample.names_4run, "_F_filt.fastq.gz"))
+filtRs_4run <- file.path(path, "filtered", paste0(sample.names_4run, "_R_filt.fastq.gz"))
+names(filtFs_4run) <- sample.names_4run
+names(filtRs_4run) <- sample.names_4run
+
+filtFs_5run <- file.path(path, "filtered", paste0(sample.names_5run, "_F_filt.fastq.gz"))
+filtRs_5run <- file.path(path, "filtered", paste0(sample.names_5run, "_R_filt.fastq.gz"))
+names(filtFs_5run) <- sample.names_5run
+names(filtRs_5run) <- sample.names_5run
+
+filtFs_6run <- file.path(path, "filtered", paste0(sample.names_6run, "_F_filt.fastq.gz"))
+filtRs_6run <- file.path(path, "filtered", paste0(sample.names_6run, "_R_filt.fastq.gz"))
+names(filtFs_6run) <- sample.names_6run
+names(filtRs_6run) <- sample.names_6run
+
+```
+
+We’ll use standard filtering parameters: maxN=0 (DADA2 requires no Ns), truncQ=2, rm.phix=TRUE and maxEE=2. The maxEE parameter sets the maximum number of “expected errors” allowed in a read, which is a better filter than simply averaging quality scores.
+
+N means the Illumina couldn't figure out the base call.
+Error refers to the quality score in the fastQ file. So EE is expected errors based on the quality score.
+
+
+WHEN RUNNING ON THE HPC: 
+Need to set multithread to multithread=FALSE or multithread=2 (or multithread= number of cores I want to use. multithread=FALSE might be very slow.) See message from Sharon:
+dada2::filterAndTrim relies on the package parallel for multithread allocation, which plays fine on Macs and personal Linux machines. But on a HPC      environment, calling parallelly::availableCores() will find all processors on that compute node, and all memory available on each processor.
+to curtail this, specify dada2::filterAndTrim(..., multithread = 2) or the number of your cores, or implement a resource check at the top of your work.
+
+```{r} 
+# out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,220),
+#               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+#               compress=TRUE, multithread=TRUE) 
+
+
+# make out for each sequencing run
+
+
+out_1run <- filterAndTrim(fnFs_1run, filtFs_1run, fnRs_1run, filtRs_1run, truncLen=c(240,220),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=2) 
+
+out_2run <- filterAndTrim(fnFs_2run, filtFs_2run, fnRs_2run, filtRs_2run, truncLen=c(240,220),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=2) 
+
+out_3run <- filterAndTrim(fnFs_3run, filtFs_3run, fnRs_3run, filtRs_3run, truncLen=c(240,220),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=2) 
+
+out_4run <- filterAndTrim(fnFs_4run, filtFs_4run, fnRs_4run, filtRs_4run, truncLen=c(240,220),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=2) 
+
+out_5run <- filterAndTrim(fnFs_5run, filtFs_5run, fnRs_5run, filtRs_5run, truncLen=c(240,220),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=2) 
+
+out_6run <- filterAndTrim(fnFs_6run, filtFs_6run, fnRs_6run, filtRs_6run, truncLen=c(240,220),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=2) 
+
+
+```
+
+
+save(out_1run, file="~/STJ_SCTLD_TS_dada2/out_1run_filterAndTrim.RData")
+
+save(out_2run, file="~/STJ_SCTLD_TS_dada2/out_2run_filterAndTrim.RData")
+
+save(out_3run, file="~/STJ_SCTLD_TS_dada2/out_3run_filterAndTrim.RData")
+
+save(out_4run, file="~/STJ_SCTLD_TS_dada2/out_4run_filterAndTrim.RData")
+
+save(out_5run, file="~/STJ_SCTLD_TS_dada2/out_5run_filterAndTrim.RData")
+
+save(out_6run, file="~/STJ_SCTLD_TS_dada2/out_6run_filterAndTrim.RData")
+
+ load("~/STJ_SCTLD_TS_dada2/out_1run_filterAndTrim.RData")
+ load("~/STJ_SCTLD_TS_dada2/out_2run_filterAndTrim.RData")
+ load("~/STJ_SCTLD_TS_dada2/out_3run_filterAndTrim.RData")
+ load("~/STJ_SCTLD_TS_dada2/out_4run_filterAndTrim.RData")
+ load("~/STJ_SCTLD_TS_dada2/out_5run_filterAndTrim.RData")
+ load("~/STJ_SCTLD_TS_dada2/out_6run_filterAndTrim.RData")
+
+
+
+###########################################################################################################
+Learn the Error Rates
+```{r}
+#errF <- learnErrors(filtFs, multithread=TRUE)
+
+# Learn errors (F) for each sequencing run
+errF_1run <- learnErrors(filtFs_1run, multithread=3)
+      #121435440 total bases in 505981 reads from 3 samples will be used for learning the error rates.
+errF_2run <- learnErrors(filtFs_2run, multithread=3)
+      #105232560 total bases in 438469 reads from 2 samples will be used for learning the error rates.
+errF_3run <- learnErrors(filtFs_3run, multithread=3)
+      #103181040 total bases in 429921 reads from 24 samples will be used for learning the error rates.
+errF_4run <- learnErrors(filtFs_4run, multithread=3)
+      #106168560 total bases in 442369 reads from 12samples will be used for learning the error rates.
+errF_5run <- learnErrors(filtFs_5run, multithread=3)
+      #105691200 total bases in 440380 reads from 14 samples will be used for learning the error rates.
+errF_6run <- learnErrors(filtFs_6run, multithread=3)
+      #145852080 total bases in 607717 reads from 4 samples will be used for learning the error rates.
+
+
+
+#errR <- learnErrors(filtRs, multithread=TRUE)
+
+# Learn errors (F) for each sequencing run
+errR_1run <- learnErrors(filtRs_1run, multithread=3)
+    #111315820 total bases in 505981 reads from 3 samples will be used for learning the error rates.
+errR_2run <- learnErrors(filtRs_2run, multithread=3)
+    #143650100 total bases in 652955 reads from 4 samples will be used for learning the error rates.
+errR_3run <- learnErrors(filtRs_3run, multithread=3)
+    #102080220 total bases in 464001 reads from 25 samples will be used for learning the error rates.
+errR_4run <- learnErrors(filtRs_4run, multithread=3)
+    #115617480 total bases in 525534 reads from 13 samples will be used for learning the error rates.
+errR_5run <- learnErrors(filtRs_5run, multithread=3)
+    #105292660 total bases in 478603 reads from 15 samples will be used for learning the error rates.
+errR_6run <- learnErrors(filtRs_6run, multithread=3)
+    #133697740 total bases in 607717 reads from 4 samples will be used for learning the error rates.
+
+plotErrors(errR_1run, nominalQ=TRUE)
+plotErrors(errR_4run, nominalQ=TRUE)
+
+```
+
+
+###########################################################################################################
+Sample Inference
+- We are now ready to apply the core sample inference algorithm to the filtered and trimmed sequence data.
+- see: https://www.nature.com/articles/nmeth.3869#methods
+```{r}
+dadaFs_1run <- dada(filtFs_1run, err=errF_1run, multithread=3)
+dadaRs_1run <- dada(filtRs_1run, err=errR_1run, multithread=3)
+dadaFs_1run[[12]]
+
+dadaFs_2run <- dada(filtFs_2run, err=errF_2run, multithread=3)
+dadaRs_2run <- dada(filtRs_2run, err=errR_2run, multithread=3)
+dadaFs_2run[[12]]
+
+dadaFs_3run <- dada(filtFs_3run, err=errF_3run, multithread=3)
+dadaRs_3run <- dada(filtRs_3run, err=errR_3run, multithread=3)
+dadaFs_3run[[12]]
+
+dadaFs_4run <- dada(filtFs_4run, err=errF_4run, multithread=3)
+dadaRs_4run <- dada(filtRs_4run, err=errR_4run, multithread=3)
+dadaFs_4run[[12]]
+
+dadaFs_5run <- dada(filtFs_5run, err=errF_5run, multithread=3)
+dadaRs_5run <- dada(filtRs_5run, err=errR_5run, multithread=3)
+dadaFs_5run[[12]]
+
+dadaFs_6run <- dada(filtFs_6run, err=errF_6run, multithread=3)
+dadaRs_6run <- dada(filtRs_6run, err=errR_6run, multithread=3)
+dadaFs_6run[[12]]
+
+```
+
+
+###########################################################################################################
+Merge paired reads
+
+- Merging is performed by aligning the denoised forward reads with the reverse-complement of the corresponding denoised reverse reads, and then constructing the merged “contig” sequences. By default, merged sequences are only output if the forward and reverse reads overlap by at least 12 bases, and are identical to each other in the overlap region (but these conditions can be changed via function arguments).
+
+```{r}
+# mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+# # Inspect the merger data.frame from the first sample
+# head(mergers[[1]])
+
+mergers_1run <- mergePairs(dadaFs_1run, filtFs_1run, dadaRs_1run, filtRs_1run, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers_1run[[1]])
+
+mergers_2run <- mergePairs(dadaFs_2run, filtFs_2run, dadaRs_2run, filtRs_2run, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers_2run[[1]])
+
+mergers_3run <- mergePairs(dadaFs_3run, filtFs_3run, dadaRs_3run, filtRs_3run, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers_3run[[1]])
+
+mergers_4run <- mergePairs(dadaFs_4run, filtFs_4run, dadaRs_4run, filtRs_4run, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers_4run[[1]])
+
+mergers_5run <- mergePairs(dadaFs_5run, filtFs_5run, dadaRs_5run, filtRs_5run, verbose=TRUE)
+  # Inspect the merger data.frame from the first sample
+head(mergers_5run[[1]])
+
+mergers_6run <- mergePairs(dadaFs_6run, filtFs_6run, dadaRs_6run, filtRs_6run, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers_6run[[1]])
+
+```
+
+###########################################################################################################
+Construct sequence table
+- We can now construct an amplicon sequence variant table (ASV) table, a higher-resolution version of the OTU table produced by traditional methods.
+```{r}
+seqtab_1run <- makeSequenceTable(mergers_1run)
+dim(seqtab_1run)
+# 23 7684
+
+seqtab_2run <- makeSequenceTable(mergers_2run)
+dim(seqtab_2run)
+# 23 6975
+
+seqtab_3run <- makeSequenceTable(mergers_3run)
+dim(seqtab_3run)
+# 53 2041
+
+seqtab_4run <- makeSequenceTable(mergers_4run)
+dim(seqtab_4run)
+# 65 9681
+
+seqtab_5run <- makeSequenceTable(mergers_5run)
+dim(seqtab_5run)
+# 26 2426
+
+seqtab_6run <- makeSequenceTable(mergers_6run)
+dim(seqtab_6run)
+# 28 3632
+
+# Inspect distribution of sequence lengths
+# table(nchar(getSequences(seqtab)))
+    # top row of output is the size of the sequence (we want 253), bottom row is how many of each length we have
+    # so then I can cut out bad amplicons -- Cynthia usually cuts plus/minus two-ish from the mode
+    ## see "Considerations for your own data" in the tutorial
+
+table(nchar(getSequences(seqtab_1run)))
+seqtab2_1run <- seqtab_1run[,nchar(colnames(seqtab_1run)) %in% 252:254]
+
+table(nchar(getSequences(seqtab_2run)))
+seqtab2_2run <- seqtab_2run[,nchar(colnames(seqtab_2run)) %in% 252:254]
+
+table(nchar(getSequences(seqtab_3run)))
+seqtab2_3run <- seqtab_3run[,nchar(colnames(seqtab_3run)) %in% 252:254]
+
+table(nchar(getSequences(seqtab_4run)))
+seqtab2_4run <- seqtab_4run[,nchar(colnames(seqtab_4run)) %in% 252:254]
+
+table(nchar(getSequences(seqtab_5run)))
+seqtab2_5run <- seqtab_5run[,nchar(colnames(seqtab_5run)) %in% 252:254]
+
+table(nchar(getSequences(seqtab_6run)))
+seqtab2_6run <- seqtab_6run[,nchar(colnames(seqtab_6run)) %in% 252:254]
+
+
+
+
+seqtab_all <- mergeSequenceTables(seqtab2_1run, seqtab2_2run, seqtab2_3run, seqtab2_4run,  seqtab2_5run,  seqtab2_6run)                   
+
+
+```
+
+
+
+###########################################################################################################
+#Remove chimeras
+```{r}
+
+seqtab_all.nochim <- removeBimeraDenovo(seqtab_all, method="consensus", multithread=2, verbose=TRUE)
+#  Identified 472 bimeras out of 24356 input sequences.
+dim(seqtab_all.nochim)
+#  218 23884
+sum(seqtab_all.nochim)/sum(seqtab_all)
+#  0.9944036
+
+
+seqtab_final <- seqtab_all.nochim
+
+
+```
+save(seqtab_final, file="~/STJ_SCTLD_TS_dada2/seqtab_final.RData")
+
+load("~/STJ_SCTLD_TS_dada2/seqtab_final.RData")
+
+
+###########################################################################################################
+#Track reads through the pipeline
+- As a final check of our progress, we’ll look at the number of reads that made it through each step in the pipeline:
+```{r}
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out_1run, sapply(dadaFs_1run, getN), sapply(dadaRs_1run, getN), sapply(mergers_1run, getN), rowSums(seqtab2_1run))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names_1run
+head(track)
+          #           input filtered denoisedF denoisedR merged nonchim
+          # Coral_46 288447   270869    269856    270004 266014  266014
+          # Coral_47 143252   131464    130507    130536 127828  126602
+          # Coral_48 111710   103648    102671    102812 100368  100215
+          # Coral_49 258140   240288    238713    238753 234618  222389
+          # Coral_50 143422   133042    132394    132265 130538  130293
+          # Coral_51 109739    98943     98321     98396  95459   93586
+
+
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out_2run, sapply(dadaFs_2run, getN), sapply(dadaRs_2run, getN), sapply(mergers_2run, getN), rowSums(seqtab2_2run))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names_2run
+head(track)
+        #                    input filtered denoisedF denoisedR merged nonchim
+        # K_7               192384   170899    170283    170223 163098  163098
+        # Mock_positive     316822   267570    266644    266660 259624  259624
+        # Negative_CTGCGTAG   3440     2417      2229      2196   2159    2159
+        # Water_56          228304   212069    208804    209156 199174  199130
+        # Water_57          113538   105571    103347    103506  98534   98495
+        # Water_58          118721   110335    108343    108583 103673  103612
+
+
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out_3run, sapply(dadaFs_3run, getN), sapply(dadaRs_3run, getN), sapply(mergers_3run, getN), rowSums(seqtab2_3run))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names_3run
+head(track)
+        #          input filtered denoisedF denoisedR merged nonchim
+        # Coral-1  27890    13380     13259     13243  13081   12673
+        # Coral-10 40773    19568     19469     19447  19367   19274
+        # Coral-11 22744    10793     10701     10731  10657    9616
+        # Coral-12 29039    13898     13816     13757  13524   12567
+        # Coral-13 35508    16735     16668     16605  16540   16540
+        # Coral-14 32689    14346     14228     14215  13920   13798
+
+
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out_4run, sapply(dadaFs_4run, getN), sapply(dadaRs_4run, getN), sapply(mergers_4run, getN), rowSums(seqtab2_4run))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names_4run
+head(track)
+        #             input filtered denoisedF denoisedR merged nonchim
+        # MockEven    69400    31019     30798     30759  30582   30582
+        # Seawater-C1  2979     1082       943       937    876     876
+        # Seawater-C2  1744      636       558       567    499     499
+        # Seawater-C3  1269      433       351       319    305     305
+        # Seawater-C4  1632      456       324       303    274     274
+        # Seawater-C5  2682      863       745       692    660     660
+
+
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out_5run, sapply(dadaFs_5run, getN), sapply(dadaRs_5run, getN), sapply(mergers_5run, getN), rowSums(seqtab2_5run))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names_5run
+head(track)
+        #        input filtered denoisedF denoisedR merged nonchim
+        # AB_A24 64213    46918     46199     46216  45419   45419
+        # AB_B24 50864    38547     38357     38293  37914   36121
+        # AB_C24 45721    37114     36775     36909  35805   31679
+        # C_101  46590    36379     36049     36045  35431   35274
+        # C_103  25779    19470     19140     19286  18845   14708
+        # C_104  43603    34120     33749     33766  33353   32959
+
+
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out_6run, sapply(dadaFs_6run, getN), sapply(dadaRs_6run, getN), sapply(mergers_6run, getN), rowSums(seqtab2_6run))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names_6run
+head(track)
+        #            input filtered denoisedF denoisedR merged nonchim
+        # K_C24        183       81        19        19      8       8
+        # K_D24       1822      768       472       488    381     381
+        # Mock      413407   296932    295386    295428 292736  292734
+        # water_100 378391   309936    306838    307260 300043  299785
+        # water_76   45810    36918     36026     35967  34268   34263
+        # water_77   53971    43396     42397     42350  40501   40492
+
+```
+
+head(seqtab_final)
+
+###########################################################################################################
+#Assign taxonomy
+the files needed can be found here: /proj/omics/bioinfo/databases/dada2
+I had to make a symbolic link, because of weird things with vortex1 vs. proj
+ln -s ../../../omics/bioinfo/databases/dada2/
+```{r}
+taxa <- assignTaxonomy(seqtab_final, "/Users/cmiller/Downloads/temp_jeanne/silva_nr99_v138.1_train_set.fa.gz", multithread=TRUE)
+    #this was >10 min on Carolyn's computer!!!! 
+taxa <- addSpecies(taxa, "/Users/cmiller/Downloads/temp_jeanne/silva_species_assignment_v138.1.fa.gz")
+    #this was >10 min on Carolyn's computer!!!! 
+
+#save(taxa, file="/Users/cmiller/Downloads/temp_jeanne/taxaAssignTax.RData")
+#load("~/STJ_SCTLD_TS_dada2/taxaAssignTax.RData")
+
+
+#Let’s inspect the taxonomic assignments:
+taxa.print <- taxa 
+rownames(taxa.print) <- NULL # Removing sequence rownames for display only
+head(taxa.print)
+
+##################################
+
+#Replace the NAs with "unknown"
+taxa_df <- as.data.frame(taxa)
+dim(taxa_df) #23884    7
+taxa_NA_is_Unknown <- taxa_df %>%
+  mutate_all(~ ifelse(is.na(.), "unknown", .))
+View(taxa_NA_is_Unknown)
+
+#Replacing NAs with the lowest taxonomic level (Code from Anya)
+#replace NAs with the deepest taxonomy available
+taxa_NA_is_LowestTax <- taxa_df
+taxa_NA_is_LowestTax$Kingdom <- as.character(taxa_NA_is_LowestTax$Kingdom)
+king_na <- which(is.na(taxa_NA_is_LowestTax$Kingdom))
+taxa_NA_is_LowestTax[king_na, "Kingdom"] <- 'Unknown'
+
+taxa_NA_is_LowestTax$Phylum <- as.character(taxa_NA_is_LowestTax$Phylum)
+phy_na <- which(is.na(taxa_NA_is_LowestTax$Phylum))
+taxa_NA_is_LowestTax[phy_na, "Phylum"] <- taxa_NA_is_LowestTax$Kingdom[phy_na] 
+
+taxa_NA_is_LowestTax$Class <- as.character(taxa_NA_is_LowestTax$Class)
+cl_na <- which(is.na(taxa_NA_is_LowestTax$Class))
+taxa_NA_is_LowestTax[cl_na, "Class"] <- taxa_NA_is_LowestTax$Phylum[cl_na]
+
+taxa_NA_is_LowestTax$Order <- as.character(taxa_NA_is_LowestTax$Order)
+ord_na <- which(is.na(taxa_NA_is_LowestTax$Order))
+taxa_NA_is_LowestTax[ord_na, "Order"] <- taxa_NA_is_LowestTax$Class[ord_na]
+
+taxa_NA_is_LowestTax$Family <- as.character(taxa_NA_is_LowestTax$Family)
+fam_na <- which(is.na(taxa_NA_is_LowestTax$Family))
+taxa_NA_is_LowestTax[fam_na, "Family"] <- taxa_NA_is_LowestTax$Order[fam_na]
+
+taxa_NA_is_LowestTax$Genus <- as.character(taxa_NA_is_LowestTax$Genus)
+gen_na <- which(is.na(taxa_NA_is_LowestTax$Genus))
+taxa_NA_is_LowestTax[gen_na, "Genus"] <- taxa_NA_is_LowestTax$Family[gen_na]
+
+taxa_NA_is_LowestTax$Species <- as.character(taxa_NA_is_LowestTax$Species)
+spec_na <- which(is.na(taxa_NA_is_LowestTax$Species))
+taxa_NA_is_LowestTax[spec_na, "Species"] <- taxa_NA_is_LowestTax$Genus[spec_na]
+
+View(taxa_NA_is_LowestTax)
+```
+save(taxa_NA_is_Unknown, file="~/STJ_SCTLD_TS_dada2/Taxa_NA_is_Unknown_LibraryJ1N2V2.RData")
+save(taxa_NA_is_LowestTax, file="~/STJ_SCTLD_TS_dada2/Taxa_NA_is_LowestTax_LibraryJ1N2V2.RData")
+^^I am saving both of those, so I don't have to make them later. But I will do the taxa_NA_is_LowestTax for downstream stuff. 
+
+
+
+
+###########################################################################################################
+#Evaluate accuracy. 
+Reference fasta for mock community here: /proj/omics/apprill/MiSeq/Mock_reference
+I had to make a symbolic link, because of weird things with vortex1 vs. proj
+ln -s ../../../omics/apprill/MiSeq/Mock_reference
+```{r}
+#set new path to mock reference file, because it isn't in FastQ_Data 
+path <-  "~/STJ_SCTLD_TS_dada2/Mock_reference" 
+
+#Check for Library J1
+unqs.mock <- seqtab_final["MockEven",]
+unqs.mock <- sort(unqs.mock[unqs.mock>0], decreasing=TRUE) # Drop ASVs absent in the Mock
+cat("DADA2 inferred", length(unqs.mock), "sample sequences present in the Mock community.\n")
+  #DADA2 inferred 32 sample sequences present in the Mock community.
+
+mock.ref <- getSequences(file.path(path, "HMP_MOCK.v35.fasta"))
+match.ref <- sum(sapply(names(unqs.mock), function(x) any(grepl(x, mock.ref))))
+cat("Of those,", sum(match.ref), "were exact matches to the expected reference sequences.\n")
+  # Of those, 22 were exact matches to the expected reference sequences.
+ 
+
+#Check for Library N2
+unqs.mock <- seqtab_final["Mock_positive",]
+unqs.mock <- sort(unqs.mock[unqs.mock>0], decreasing=TRUE) # Drop ASVs absent in the Mock
+cat("DADA2 inferred", length(unqs.mock), "sample sequences present in the Mock community.\n")
+  #DADA2 inferred 29 sample sequences present in the Mock community.
+
+mock.ref <- getSequences(file.path(path, "HMP_MOCK.v35.fasta"))
+match.ref <- sum(sapply(names(unqs.mock), function(x) any(grepl(x, mock.ref))))
+cat("Of those,", sum(match.ref), "were exact matches to the expected reference sequences.\n")
+  # Of those, 22 were exact matches to the expected reference sequences.
+ 
+
+#Check for Library V2
+unqs.mock <- seqtab_final["Mock",]
+unqs.mock <- sort(unqs.mock[unqs.mock>0], decreasing=TRUE) # Drop ASVs absent in the Mock
+cat("DADA2 inferred", length(unqs.mock), "sample sequences present in the Mock community.\n")
+  #DADA2 inferred 39 sample sequences present in the Mock community.
+
+mock.ref <- getSequences(file.path(path, "HMP_MOCK.v35.fasta"))
+match.ref <- sum(sapply(names(unqs.mock), function(x) any(grepl(x, mock.ref))))
+cat("Of those,", sum(match.ref), "were exact matches to the expected reference sequences.\n")
+  # Of those, 22 were exact matches to the expected reference sequences.
+ 
+
+```
+
+
+###########################################################################################################
+#Clean up and finalize
+From Cynthia: 
+Make outputtable ASV tables and taxonomy files
+Make sure the seqtab2.nochim file with all the ASVs and the taxa are all in the same order. Save the sequences with an ASV# identifier.
+
+```{r}
+otus <- seqtab_final
+taxonomy <- taxa_NA_is_Unknown
+
+idx <- match(rownames(taxonomy), colnames(otus)) 
+#returns a vector of the same length as rownames(taxonomy), where each element is the position (index) of the corresponding row name in the colnames(otus) vector.
+otus <- otus[,idx]
+#reorder or subset the columns of the otus data frame  based on the indices stored in idx.
+
+#save a dataframe with a new ASV identifier and the sequence from the rownames for taxa
+#This is very important because you want to save the sequence for REPRODUCIBILITY and TRACTABILITY
+ASVseqs <- data.frame("ASV_ID" = paste0("ASV", seq(from = 1, to = ncol(seqtab_final), by = 1)), "sequence" = rownames(taxonomy))
+
+
+#Match to otu and taxa dataframe using ASV_ID numbers, so they are easier to interpret
+colnames(otus) <- ASVseqs$ASV_ID
+rownames(taxonomy) <- ASVseqs$ASV_ID
+
+```
+
+Recap:
+Write these tables so you have them for future data analysis
+```{r}
+save(otus, file="~/STJ_SCTLD_TS_dada2/otus_SCTSCTLDTD_J1N2V2_final.RData")
+write.table(taxonomy, file = "taxonomy_SCTSCTLDTD_J1N2V2_final.txt", sep = "\t", row.names = TRUE, col.names = TRUE)
+write.table(ASVseqs, file = "ASVsequences_SCTSCTLDTD_J1N2V2_final.txt", sep = "\t", row.names = TRUE, col.names = TRUE)
+```
+
+
