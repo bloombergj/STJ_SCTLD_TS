@@ -1,0 +1,1295 @@
+---
+title: "STJ_SCTLD_Timeseries_Phyloseq_Sept2023"
+author: "JeanneBloomberg"
+date: "5/27/2023"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+setwd("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code")
+```
+
+```{r}
+# For data wrangling
+library(dplyr); packageVersion("dplyr")
+library(tidyr); packageVersion("tidyr")
+library(knitr); packageVersion("knitr")
+
+# For microbiome/metagenome analysis
+library(corncob); packageVersion("corncob")
+library(vegan); packageVersion("vegan")
+library(phyloseq); packageVersion("phyloseq")
+#install.packages("remotes")
+#remotes::install_github("mikemc/speedyseq")
+library(speedyseq); packageVersion("speedyseq")
+
+# For visualization
+library(ggplot2); packageVersion("ggplot2")
+theme_set(theme_bw())
+
+library(stringr)
+library(ggforce)
+
+
+library(ggpubr)
+library(cowplot)
+
+
+library(eulerr)
+library(BiocManager)
+#BiocManager::install("microbiome")
+library(microbiome)
+#devtools::install_github('microsud/microbiomeutilities')
+library(microbiomeutilities)
+
+```
+
+
+```{r}
+#Upload data
+load("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/otus_STJSCTLD_final.RData")
+
+otus <- otus_noDuplicates
+samples_we_use <- row.names(otus)
+ASV <- as.matrix(otus)
+
+
+
+taxa <- as.matrix(read.table("taxonomy_STJSCTLD_final.txt", sep = "\t", row.names = 1, header = TRUE))
+
+ASV_ID <-read.table("ASVsequences_STJSCTLD_final.txt", sep = "\t", row.names = 1, header = TRUE)
+
+metadata <- read.csv("meta_table.csv", header = TRUE)
+metadata <- metadata[1:164, 1:24]
+row.names(metadata) <- metadata$Sample_names
+metadata <- metadata[samples_we_use, ]
+
+#metadata$Date_nice <- as.Date(metadata$Date , format = "%Y/%m/%d")
+
+```
+
+
+
+```{r}
+# Make a phyloseq object. Corncob works with these. 
+ASV = otu_table(ASV, taxa_are_rows = FALSE)
+TAX = tax_table(taxa)
+META = sample_data(metadata)
+
+ps <- phyloseq(ASV, TAX, META)
+  #taxa: 20481
+  #samples: 139
+
+
+#remove contaminants
+load("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/contam.RData")
+
+ps.decontam <- prune_taxa(!contam$contaminant, ps)#went from 20481 taxa to 20430 taxa
+  #taxa: 20430
+  #samples: 139
+
+#remove ASVS with all zeros
+ps.decontam.nozero <- filter_taxa(ps.decontam, function(x) sum(x) > 0, TRUE)
+  #taxa: 20125 taxa
+  #samples: 139
+
+    paste("Number of ASVs in the dataset (without contaminants) prior to removing ASVs not present in any sample =", ntaxa(ps.decontam))
+      #20430
+    paste("Number of ASVs in the dataset (without contaminants) after removing ASVs not present in any sample =", ntaxa(ps.decontam.nozero))
+      #20125
+    paste("the number of ASVs not present in any sample that were removed =", ntaxa(ps.decontam)-ntaxa(ps.decontam.nozero))
+      #305
+    
+#Remove the samples I don't want to use: (14 samples removed)
+    #Coral_48 --> only diseased sample at Coral Bay
+    #Seawater_61 --> only diseased sample at Coral Bay
+    #Seawater_68 --> only dead sample at Coral Bay
+    #Tag 1534 (4 samples)
+    #Tag 2300 (2 samples)
+    #HealthState DH (4) --> only going to remove these for coral samples, not SW
+ 
+ ps.decontam.filt <- ps.decontam.nozero %>%
+    subset_samples(Sample_ID !="Coral_48" & 
+                   Sample_ID !="Seawater_61" &
+                   Sample_ID !="Seawater_68" & 
+                   Tag !="1534" & 
+                   Tag !="2300")
+                   
+    
+  #taxa: 20125 taxa
+  #samples: 130
+       
+  ps.nocontrol.nomirochloro <- ps.decontam.nozero %>%
+    subset_samples(Sample_ID !="Coral_48" & 
+                   Sample_ID !="Seawater_61" &
+                   Sample_ID !="Seawater_68" & 
+                   Tag !="1534" & 
+                   Tag !="2300") %>%
+                   subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>%
+                   subset_samples(Sample_Type != "Coral")
+ 
+ Reads_per_sample <- as.data.frame(sample_sums(ps.nocontrol.nomirochloro))
+ mean(Reads_per_sample$`sample_sums(ps.nocontrol.nomirochloro)`)  #85306.06
+ sd(Reads_per_sample$`sample_sums(ps.nocontrol.nomirochloro)`)  #46542.01
+ sum(Reads_per_sample$`sample_sums(ps.nocontrol.nomirochloro)`)
+```
+
+Sums_all <- as.data.frame(rowSums(otu_table(ps.decontam.nozero)))
+
+
+#phyloseq obejct with coral and seawater from both sites
+```{r}
+ps.SWandCoral.BothSites <- ps.decontam.filt %>%
+  transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
+  subset_samples(Sample_Type != "Control") %>%   #take out controls
+  subset_samples(Sample_Type != "Mock") %>% #take out mock
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+ps.ord <- ordinate(ps.SWandCoral.BothSites, "PCoA", "bray", trymax = 50, k =3, set.seed(18))
+
+
+BothSamp_BothSite_metadata <- data.frame(sample_data(ps.SWandCoral.BothSites))
+Perm.site <- adonis2(distance(ps.SWandCoral.BothSites, method="bray") ~ Site, data=BothSamp_BothSite_metadata, strata=BothSamp_BothSite_metadata$Tag, perm=999)
+Perm.site
+
+    #       Number of permutations: 999
+    #                  Df SumOfSqs      R2      F Pr(>F)
+    #        Site       1    1.075 0.02255 2.8149      1
+    #        Residual 122   46.602 0.97745              
+    #        Total    123   47.678 1.00000
+
+plot_ordination(ps.SWandCoral.BothSites, ps.ord , type="samples", color="Site", shape = "Sample_Type") +
+  geom_point(size = 4) 
+
+```
+
+
+#phyloseq obejct with Coral from both sites
+```{r}
+ps.coral <- ps.decontam.filt %>%
+  transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
+  subset_samples(Sample_Type == "Coral") %>%   #subset coral samples
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+Coral.ord <- ordinate(ps.coral, "PCoA", "bray", trymax = 50, k =3, set.seed(18))
+
+p2 = plot_ordination(ps.coral, Coral.ord, type="samples", color="Healthy_Diseased_Recovered", shape="Site") +
+  geom_point(size = 4) 
+
+
+p = plot_ordination(ps.coral, Coral.ord, type="samples", color="Site", shape="Site_Disease") +
+  geom_point(size = 4) 
+
+plot_ordination(ps.coral, Coral.ord , type="samples", color="Fate", shape = "Site") +
+  geom_point(size = 4) 
+
+plot_ordination(ps.coral, Coral.ord , type="samples", color="Site", shape = "Fate") +
+  geom_point(size = 4) +
+  facet_grid(~ Healthy_Diseased_Recovered)
+
+plot_ordination(ps.coral, Coral.ord , type="samples", color="Healthy_Diseased_Recovered", shape = "Fate") +
+  geom_point(size = 4) +
+  facet_grid(~ Site)
+
+plot_ordination(ps.coral, Coral.ord , type="samples", color="Healthy_Diseased_Recovered", shape = "Site") +
+  geom_point(size = 4) 
+
+```
+Coral_bothsite_Health
+
+
+
+#phyloseq obejct with Coral from only Fish Bay
+```{r}
+ps.coral.Fishbay <- ps.decontam.filt %>%
+  transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
+  subset_samples(Sample_Type == "Coral") %>% #subset coral samples
+  subset_samples(Site == "Fish_Bay") %>%
+  subset_samples(HealthState != "DH") %>%
+  subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>% 
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+```
+
+```{r}
+Coral.FishBay.ord <- ordinate(ps.coral.Fishbay, "PCoA", "bray",  trymax = 100, k =3, set.seed(18))
+
+# plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", color="Timepoint", shape = "Healthy_Diseased_Recovered") +
+# #  scale_color_brewer(palette = "Oranges") +
+#   geom_point(size = 4) +
+#  # facet_grid(~ Tag) +
+#   geom_mark_ellipse(aes(color = Healthy_Diseased_Recovered)) 
+# 
+# 
+# plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", color="Fate", shape = "Healthy_Diseased_Recovered") +
+#   geom_point(size = 4) 
+# x
+# 
+# plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", color="Fate") +
+#   geom_point(size = 4) +
+#     geom_mark_ellipse(aes(filter = Fate == "Dead")) +
+#   geom_mark_ellipse(aes(filter = Fate == "Diseased")) +
+#   geom_mark_ellipse(aes(filter = Fate == "Healthy")) +
+#   geom_mark_ellipse(aes(filter = Fate == "Recovered")) 
+
+
+
+
+plot2A <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", color="Healthy_Diseased_Recovered") +
+  geom_point(size = 4, aes(color = factor(Healthy_Diseased_Recovered))) +
+  theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", 
+        legend.direction ="vertical", 
+        plot.margin = unit(c(0, 0.5, 0.5, 0), "cm")) +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  labs(color = "Coral health state", tag = "A") +
+  scale_color_manual(breaks=c("Healthy", "Diseased", "Recovered"), 
+                       values = c("mediumseagreen", "darkorange2", "darkorchid3")) 
+
+
+
+
+
+Coral_FishBay_metadata <- data.frame(sample_data(ps.coral.Fishbay))
+perm.C.FB.HDR <- adonis2(distance(ps.coral.Fishbay, method="bray") ~ Healthy_Diseased_Recovered, data=Coral_FishBay_metadata, strata=Coral_FishBay_metadata$Tag, perm=999)
+perm.C.FB.HDR 
+
+
+    #      Number of permutations: 999
+    #                                Df SumOfSqs     R2      F Pr(>F)  
+    #      Healthy_Diseased_Recovered  2   1.1282 0.0911 1.2027  0.019 *
+    #      Residual                   24  11.2563 0.9089                
+    #      Total                      26  12.3845 1.0000  
+
+
+plot2B <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", color="Date") +
+  geom_point(size = 4) +
+  theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", 
+        legend.direction ="vertical", 
+        plot.margin = unit(c(0, 0, 0.5, 0.5), "cm")) +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  labs(color = "Date", tag ="B")
+
+  
+#get just the legend for plotting
+legend_2Date <- get_legend(plot2B)
+legend_2Date <- as_ggplot(legend_2Date)
+
+
+
+
+perm.C.FB.date <- adonis2(distance(ps.coral.Fishbay, method="bray") ~ Date, data = Coral_FishBay_metadata)
+perm.C.FB.date 
+    #   Number of permutations: 999
+    #             Df SumOfSqs      R2      F Pr(>F)  
+    #    Date      6   3.0436 0.24576 1.0861  0.048 *
+    #    Residual 20   9.3409 0.75424                
+    #    Total    26  12.3845 1.00000                
+     
+
+plot3 <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", shape ="Healthy_Diseased_Recovered", color = "Date") +
+  facet_wrap(~Tag, scale="fixed", ncol=3)  +
+  geom_point(size = 5) +
+   theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", 
+        legend.direction ="vertical") +
+        labs(color = "Date", shape = "Coral health state") + 
+        scale_shape_discrete(breaks=c("Healthy", "Diseased", "Recovered"))
+
+
+  
+
+
+```
+saved as: FishBay_Coral_Timpoint&Health
+          FishBay_Coral_Fate&Health
+          FishBay_Coral_FateWellipse
+          FishBay_Coral_Healthpoint
+          FishBay_Coral_Healthpoint_faceted
+
+
+#phyloseq obejct with Seawater from only Fish Bay
+```{r}
+ps.seawater.Fishbay <- ps.decontam.filt %>%
+  transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
+  subset_samples(Sample_Type == "Seawater") %>% #subset coral samples
+  subset_samples(Site == "Fish_Bay") %>%
+  subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>% 
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+```
+
+```{r}
+SW.FishBay.ord <- ordinate(ps.seawater.Fishbay, "PCoA", "bray",  trymax = 200, weakties = FALSE, set.seed(18))
+
+
+
+plot2C <- plot_ordination(ps.seawater.Fishbay, SW.FishBay.ord , type="samples", color="Healthy_Diseased_Recovered") +
+  geom_point(size = 4, aes(color = factor(Healthy_Diseased_Recovered))) +
+  theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", 
+        legend.direction ="vertical", 
+        plot.margin = unit(c(0.5, 0.5, 0, 0), "cm")) +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  labs(color = "Coral health state", tag = "C") +
+  scale_color_manual(breaks=c("Healthy", "Diseased", "Recovered", "Dead"), 
+                       values = c("mediumseagreen", "darkorange2", "darkorchid3", "gray50")) 
+
+
+
+#get just the legend for plotting
+legend_2health <- get_legend(plot2C)
+legend_2health <- as_ggplot(legend_2health)
+
+
+
+
+SW_FishBay_metadata <- data.frame(sample_data(ps.seawater.Fishbay))
+perm.SW.FB.HDR <- adonis2(distance(ps.seawater.Fishbay, method="bray") ~ Healthy_Diseased_Recovered, data=SW_FishBay_metadata, strata=SW_FishBay_metadata$Tag, perm=999)
+perm.SW.FB.HDR 
+
+    #    Number of permutations: 999
+    #                                  Df SumOfSqs      R2      F Pr(>F)  
+    #      Healthy_Diseased_Recovered  3   1.3104 0.26819 3.2982  0.016 *
+    #      Residual                   27   3.5758 0.73181                
+    #      Total                      30   4.8862 1.00000  
+
+
+
+plot2D <- plot_ordination(ps.seawater.Fishbay, SW.FishBay.ord , type="samples", color="Date") +
+  geom_point(size = 4) +
+  theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", 
+        legend.direction ="vertical", 
+        plot.margin = unit(c(0.5, 0, 0, 0.5), "cm")) +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  labs(color = "Date", tag ="D")
+
+
+
+
+
+perm.SW.FB.date <- adonis2(distance(ps.seawater.Fishbay, method="bray") ~ Date, data = SW_FishBay_metadata, permutations = 999)
+perm.SW.FB.date 
+
+    #    Number of permutations: 999
+    #             Df SumOfSqs      R2     F Pr(>F)   
+    #    Date      6   2.0039 0.41012 2.781  0.002 **
+    #    Residual 24   2.8823 0.58988                
+    #    Total    30   4.8862 1.0000
+
+
+
+plot_ordination(ps.seawater.Fishbay, SW.FishBay.ord , type="samples", color="Tag") +
+  geom_point(size = 4) +
+  theme(text=element_text(size=14), legend.title = element_blank(), legend.text=element_text(size=20)) +
+  labs(title = "Seawater from Fish Bay")
+
+
+
+
+```
+save as: Seawater_FishBay_Health
+
+SW_FishBay_OTU <- as.data.frame(otu_table(ps.seawater.Fishbay))
+check_FB_SW <- as.data.frame(rownames(SW_FishBay_OTU))
+check_FB_SW$ASVsum <- rowSums(SW_FishBay_OTU)
+hist(check_FB_SW$ASVsum)
+distance_matrix <- SW.FishBay.ord$points
+ # SW-32: 228.40978, 0.68652091, -0.570158161
+ # SW-41: 227.75985, -0.68577640, 0.573617623
+ 
+
+Sums <- as.data.frame(rowSums(otus))
+ 
+
+#phyloseq obejct with Seawater from only Coral Bay
+```{r}
+
+ps.Seawater.Coralbay <- ps.decontam.filt %>%
+  transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
+  subset_samples(Sample_Type == "Seawater") %>% #subset Seawater samples
+  subset_samples(Site == "Coral_Bay") %>%
+  subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>% 
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+
+
+```
+
+```{r}
+SW.CoralBay.ord <- ordinate(ps.Seawater.Coralbay, "PCoA", "bray",  trymax = 50, k =2, set.seed(18))
+
+plot1C <- plot_ordination(ps.Seawater.Coralbay, SW.CoralBay.ord , type="samples", color="Site_Disease") +
+  geom_point(size = 4, aes(color = factor(Site_Disease))) +
+  theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", legend.direction ="vertical", 
+        plot.margin = unit(c(0.5, 0.5, 0, 0), "cm")) +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  labs(color = "Reef health state", tag = "C") +
+  scale_color_manual(breaks=c("Before", "After"), 
+                       values = c("dodgerblue3", "hotpink2"), 
+                       labels = c("Before SCTLD arrived", "After SCTLD arrived")) 
+    
+#get just the legend for plotting
+legend_ReefHealthState <- get_legend(plot1C)
+legend_ReefHealthState <- as_ggplot(legend_ReefHealthState)
+
+
+
+SW_CoralBay_metadata <- data.frame(sample_data(ps.Seawater.Coralbay))
+perm.SW.CB.HDR <- adonis2(distance(ps.Seawater.Coralbay, method="bray") ~ Site_Disease, data=SW_CoralBay_metadata, strata=SW_CoralBay_metadata$Tag, perm=999)
+perm.SW.CB.HDR 
+
+    #       Number of permutations: 999
+    #                         Df SumOfSqs      R2      F Pr(>F)   
+    #        Site_Disease  1  0.38847 0.17202 6.8558  0.001 ***
+    #        Residual     33  1.86989 0.82798                  
+    #        Total        34  2.25837 1.00000  
+
+
+
+plot1D <- plot_ordination(ps.Seawater.Coralbay, SW.CoralBay.ord , type="samples", color="Date") +
+  geom_point(size = 4) +
+  theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", 
+        legend.direction ="vertical", 
+        plot.margin = unit(c(0.5, 0, 0, 0.5), "cm")) +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  labs(color = "Date", tag ="D")
+
+
+#get just the legend for plotting
+legend_Date1 <- get_legend(plot1D)
+legend_Date1 <- as_ggplot(legend_Date1)
+
+
+
+perm.SW.CB.date <- adonis2(distance(ps.Seawater.Coralbay, method="bray") ~ Date, data = SW_CoralBay_metadata)
+perm.SW.CB.date 
+
+  #      Number of permutations: 999
+  #               Df SumOfSqs      R2     F Pr(>F)    
+  #      Date      7  1.92057 0.85043 21.93  0.001 ***
+  #      Residual 27  0.33779 0.14957                 
+  #      Total    34  2.25837 1.00000   
+
+
+```
+
+checking <- as.data.frame(rownames(otus))
+checking$ASVsum <- rowSums(otus)
+hist(checking$ASVsum)
+
+SW_CoralBay_OTU <- as.data.frame(otu_table(ps.Seawater.Coralbay))
+check_CB_SW <- as.data.frame(rownames(SW_CoralBay_OTU))
+check_CB_SW$ASVsum <- rowSums(SW_CoralBay_OTU)
+hist(check_CB_SW$ASVsum)
+
+
+#phyloseq obejct with Coral from only Coral Bay
+```{r}
+
+ps.Coral.Coralbay <- ps.decontam.filt %>%
+  transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
+  subset_samples(Sample_Type == "Coral") %>% #subset Seawater samples
+  subset_samples(Site == "Coral_Bay") %>%
+  subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>% 
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+
+```
+
+```{r}
+Coral.CoralBay.ord <- ordinate(ps.Coral.Coralbay, "PCoA", "bray",  trymax = 50, k =2, set.seed(18))
+
+
+
+plot1A <- plot_ordination(ps.Coral.Coralbay, Coral.CoralBay.ord , type="samples", color="Site_Disease") +
+  geom_point(size = 4, aes(color = factor(Site_Disease))) +
+  theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", 
+        legend.direction ="vertical", 
+        plot.margin = unit(c(0, 0.5, 0.5, 0), "cm")) +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  labs(color = "Reef health state", tag = "A") +
+  scale_color_manual(breaks=c("Before", "After"), 
+                       values = c("dodgerblue3", "hotpink2"),
+                       labels = c("Before SCTLD arrived", "After SCTLD arrived")) 
+
+
+
+
+Coral_CoralBay_metadata <- data.frame(sample_data(ps.Coral.Coralbay))
+perm.C.CB.HDR <- adonis2(distance(ps.Coral.Coralbay, method="bray") ~ Site_Disease, data=Coral_CoralBay_metadata, strata=Coral_CoralBay_metadata$Tag, perm=999)
+perm.C.CB.HDR 
+
+  #        Number of permutations: 999
+  #                         Df SumOfSqs      R2      F Pr(>F)
+  #          Site_Disease  1    0.540 0.03907 1.1384   0.14
+  #          Residual     28   13.282 0.96093              
+  #          Total        29   13.822 1.00000 
+
+
+
+
+plot1B <- plot_ordination(ps.Coral.Coralbay, Coral.CoralBay.ord , type="samples", color="Date") +
+  geom_point(size = 4) +
+  theme(text=element_text(size=17),  
+        legend.text=element_text(size=17), 
+        panel.grid = element_blank(), 
+        axis.text = element_text(size = 17), 
+        legend.position = "bottom", 
+        legend.direction ="vertical", 
+        plot.margin = unit(c(0, 0, 0.5, 0.5), "cm")) +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+  labs(color = "Date", tag = "B")
+
+perm.C.CB.date <- adonis2(distance(ps.Coral.Coralbay, method="bray") ~ Date, data = Coral_CoralBay_metadata)
+perm.C.CB.date 
+
+      #    Number of permutations: 999
+      #             Df SumOfSqs      R2      F Pr(>F)  
+      #    Date      6   3.2359 0.23411 1.1717  0.015 *
+      #    Residual 23  10.5861 0.76589                
+      #    Total    29  13.8220 1.00000  
+
+```
+
+
+
+
+#put plots together for Fig 1
+```{r}
+
+plot_grid(plot1A + theme(legend.position = "none"), 
+          plot1B + theme(legend.position = "none"), 
+          plot1C + theme(legend.position = "none"), 
+          plot1D + theme(legend.position = "none"), 
+          legend_ReefHealthState, 
+          legend_Date1, 
+          ncol = 2, nrow = 3)
+
+```
+
+
+
+
+#put plots together for Fig 2
+```{r}
+
+plot_grid(plot2A + theme(legend.position = "none"), 
+          plot2B + theme(legend.position = "none"), 
+          plot2C + theme(legend.position = "none"), 
+          plot2D + theme(legend.position = "none"), 
+          legend_2health, 
+          legend_2Date, 
+          ncol = 2, nrow = 3)
+
+```
+
+
+
+
+#Beta Diversity 
+###Dispersion 
+
+#MODIFIED FROM CYNTHIA: Code to Reproduce R Figures
+my code is sloppy, oops
+
+#DispXPrev - Fish Bay Seawater
+```{r}
+metadat_rel <- as.data.frame(as.matrix(sample_data(ps.seawater.Fishbay)))
+
+otu_rel <- as.matrix(otu_table(ps.seawater.Fishbay))
+otu_rel2 <- as.data.frame(otu_rel)
+otu_rel2 <- otu_rel2[, colSums(otu_rel2 != 0) > 0] #get rid of ASVs that have no abundance in any samples
+#otu_rel_tra <- t(otu_rel2) #make sure sample names are rows
+ASV.coral.log <- log(otu_rel2+1) #Log transform the realtive abundance data, where I add a 1 pseudocount to everything
+
+ASV.coral.log.b <- vegdist(ASV.coral.log, "bray") #calculate bray curtis dissimilarity
+
+#calculate multivariate dispersions based on condition - Distances to the centroid!
+mod2 <-betadisper(ASV.coral.log.b, metadat_rel$Date)
+
+#Get the distances to centroid from the model
+dis2 <- as.data.frame(mod2$distances) #save the distances
+dis2.meta <- cbind(dis2, metadat_rel) #combine distances with the metadata
+colnames(dis2.meta)[1] <- "distance"
+
+dis2.meta$Date_nice <- as.Date(dis2.meta$Date)
+
+#run linear model and Kruskal-Wallis test to test significance
+distlm2 <-lm(distance~Date, data=dis2.meta)
+anova(distlm2)
+      #Response: distance
+      #          Df   Sum Sq   Mean Sq F value    Pr(>F)    
+      #Date       6 0.39411 0.065685  1.0591 0.4136
+      #Residuals 24 1.48853 0.062022 
+
+summary(distlm2)
+        # Residual standard error: 0.249 on 24 degrees of freedom
+        #  Multiple R-squared:  0.2093,	Adjusted R-squared:  0.01167 
+        #  F-statistic: 1.059 on 6 and 24 DF,  p-value: 0.4136
+
+
+
+
+dis2.meta$Prev_Percent <- as.numeric(dis2.meta$Prev_Percent)
+
+plot <- ggplot(dis2.meta)+
+  geom_point(aes(x = Date_nice, y=distance), color="Blue") +
+  geom_smooth(aes(x = Date_nice, y=distance), method = "lm", color="Blue", se = FALSE) +
+  geom_point(data=subset(dis2.meta, !is.na(Prev_Percent)), aes(x = Date_nice, y=Prev_Percent/5), na.rm = TRUE, color="Red") +
+  geom_smooth(data=subset(dis2.meta, !is.na(Prev_Percent)), aes(x = Date_nice, y=Prev_Percent/5), na.rm = TRUE, method = "lm", color="Red", se = FALSE) +
+  scale_y_continuous(name = "Distance to Centroid",
+    sec.axis = sec_axis(~.*5, name="SCTLD Prevelance (percent)")) +
+  xlab("Date") +
+  theme(text=element_text(size=13))+
+  ggtitle("Beta diversity and SCTLD Prevelance in Fish Bay Seawater") +
+  theme(axis.title.y = element_text(color = "Blue", size=13),
+    axis.title.y.right = element_text(color = "Red", size=13))
+
+plot
+```
+
+#DispXPrev - add Fish Bay Coral
+```{r}
+metadat_rel <- as.data.frame(as.matrix(sample_data(ps.coral.Fishbay)))
+
+otu_rel <- as.matrix(otu_table(ps.coral.Fishbay))
+otu_rel2 <- as.data.frame(otu_rel)
+otu_rel2 <- otu_rel2[, colSums(otu_rel2 != 0) > 0] #get rid of ASVs that have no abundance in any samples
+#otu_rel_tra <- t(otu_rel2) #make sure sample names are rows
+ASV.coral.log <- log(otu_rel2+1) #Log transform the realtive abundance data, where I add a 1 pseudocount to everything
+
+ASV.coral.log.b <- vegdist(ASV.coral.log, "bray") #calculate bray curtis dissimilarity
+
+#calculate multivariate dispersions based on condition - Distances to the centroid!
+mod2 <-betadisper(ASV.coral.log.b, metadat_rel$Date)
+
+#Get the distances to centroid from the model
+dis2 <- as.data.frame(mod2$distances) #save the distances
+dis2.meta <- cbind(dis2, metadat_rel) #combine distances with the metadata
+colnames(dis2.meta)[1] <- "distance"
+
+dis2.meta$Date_nice <- as.Date(dis2.meta$Date)
+
+#run linear model and Kruskal-Wallis test to test significance
+distlm2 <-lm(distance~Date, data=dis2.meta)
+anova(distlm2)
+      #Response: distance
+      #          Df   Sum Sq   Mean Sq F value    Pr(>F)    
+      #Date       6 0.073331 0.0122219   9.587 5.056e-05 ***
+      #Residuals 20 0.025497 0.0012748      
+summary(distlm2)
+      # Residual standard error: 0.0357 on 20 degrees of freedom
+      # Multiple R-squared:  0.742,	Adjusted R-squared:  0.6646 
+      # F-statistic: 9.587 on 6 and 20 DF,  p-value: 5.056e-05
+
+Prev_data_noNA<- na.omit(dis2.meta)
+
+dis2.meta$Prev_Percent <- as.numeric(dis2.meta$Prev_Percent)
+
+plot + 
+  geom_point(data = dis2.meta, aes(x = Date_nice, y=distance), color="purple") +
+  geom_smooth(data = dis2.meta, aes(x = Date_nice, y=distance), method = "lm", color="purple", se = FALSE) 
+
+```
+
+
+
+
+
+
+#DispXPrev - Coral Bay Seawater
+```{r}
+metadat_rel <- as.data.frame(as.matrix(sample_data(ps.Seawater.Coralbay)))
+
+otu_rel <- as.matrix(otu_table(ps.Seawater.Coralbay))
+otu_rel2 <- as.data.frame(otu_rel)
+otu_rel2 <- otu_rel2[, colSums(otu_rel2 != 0) > 0] #get rid of ASVs that have no abundance in any samples
+#otu_rel_tra <- t(otu_rel2) #make sure sample names are rows
+ASV.coral.log <- log(otu_rel2+1) #Log transform the realtive abundance data, where I add a 1 pseudocount to everything
+
+ASV.coral.log.b <- vegdist(ASV.coral.log, "bray") #calculate bray curtis dissimilarity
+
+#calculate multivariate dispersions based on condition - Distances to the centroid!
+mod2 <-betadisper(ASV.coral.log.b, metadat_rel$Date)
+
+#Get the distances to centroid from the model
+dis2 <- as.data.frame(mod2$distances) #save the distances
+dis2.meta <- cbind(dis2, metadat_rel) #combine distances with the metadata
+colnames(dis2.meta)[1] <- "distance"
+
+dis2.meta$Date_nice <- as.Date(dis2.meta$Date)
+
+#run linear model and Kruskal-Wallis test to test significance
+distlm2 <-lm(distance~Date, data=dis2.meta)
+anova(distlm2)
+      #Response: distance
+      #          Df   Sum Sq   Mean Sq F value    Pr(>F)    
+      #Date      7 0.014760 0.0021086  1.2215 0.3253
+      #Residuals 27 0.046607 0.0017262
+summary(distlm2)
+    #    Residual standard error: 0.04155 on 27 degrees of freedom
+    #    Multiple R-squared:  0.2405,	Adjusted R-squared:  0.04362 
+    #    F-statistic: 1.222 on 7 and 27 DF,  p-value: 0.3253
+
+
+dis2.meta$Prev_Percent <- as.numeric(dis2.meta$Prev_Percent)
+
+plot <- ggplot(dis2.meta)+
+  geom_point(aes(x = Date_nice, y=distance), color="Blue") +
+  geom_smooth(aes(x = Date_nice, y=distance), method = "lm", color="Blue", se = FALSE) +
+  geom_point(data=subset(dis2.meta, !is.na(Prev_Percent)), aes(x = Date_nice, y=Prev_Percent/10), na.rm = TRUE, color="Red") +
+  geom_smooth(data=subset(dis2.meta, !is.na(Prev_Percent)), aes(x = Date_nice, y=Prev_Percent/10), na.rm = TRUE, method = "lm", color="Red", se = FALSE) +
+  scale_y_continuous(name = "Distance to Centroid",
+    sec.axis = sec_axis(~.*10, name="SCTLD Prevelance (percent)")) +
+  xlab("Date") +
+  theme(text=element_text(size=13))+
+  ggtitle("Beta div.and SCTLD Prev. in CoralBay") +
+  theme(axis.title.y = element_text(color = "Blue", size=13),
+    axis.title.y.right = element_text(color = "Red", size=13))
+
+plot
+```
+
+#DispXPrev - add Coral Bay Coral
+```{r}
+metadat_rel <- as.data.frame(as.matrix(sample_data(ps.Coral.Coralbay)))
+
+otu_rel <- as.matrix(otu_table(ps.Coral.Coralbay))
+otu_rel2 <- as.data.frame(otu_rel)
+otu_rel2 <- otu_rel2[, colSums(otu_rel2 != 0) > 0] #get rid of ASVs that have no abundance in any samples
+#otu_rel_tra <- t(otu_rel2) #make sure sample names are rows
+ASV.coral.log <- log(otu_rel2+1) #Log transform the realtive abundance data, where I add a 1 pseudocount to everything
+
+ASV.coral.log.b <- vegdist(ASV.coral.log, "bray") #calculate bray curtis dissimilarity
+
+#calculate multivariate dispersions based on condition - Distances to the centroid!
+mod2 <-betadisper(ASV.coral.log.b, metadat_rel$Date)
+
+#Get the distances to centroid from the model
+dis2 <- as.data.frame(mod2$distances) #save the distances
+dis2.meta <- cbind(dis2, metadat_rel) #combine distances with the metadata
+colnames(dis2.meta)[1] <- "distance"
+
+dis2.meta$Date_nice <- as.Date(dis2.meta$Date)
+
+#run linear model and Kruskal-Wallis test to test significance
+distlm2 <-lm(distance~Date, data=dis2.meta)
+anova(distlm2)
+      #Response: distance
+      #          Df   Sum Sq   Mean Sq F value    Pr(>F)    
+      #Date      6 0.018014 0.0030023  0.4214 0.8571
+      #Residuals 23 0.163881 0.0071253     
+summary(distlm2)
+  #        Residual standard error: 0.08441 on 23 degrees of freedom
+  #        Multiple R-squared:  0.09903,	Adjusted R-squared:  -0.136 
+  #        F-statistic: 0.4214 on 6 and 23 DF,  p-value: 0.8571
+
+
+Prev_data_noNA<- na.omit(dis2.meta)
+
+dis2.meta$Prev_Percent <- as.numeric(dis2.meta$Prev_Percent)
+
+plot + 
+  geom_point(data = dis2.meta, aes(x = Date_nice, y=distance), color="purple") +
+  geom_smooth(data = dis2.meta, aes(x = Date_nice, y=distance), method = "lm", color="purple", se = FALSE) 
+
+```
+
+
+
+
+#Stacked Bar plots
+
+#20 most abundant AVS -- Corals from Fish Bay
+```{r}
+asv_abundance <- as.data.frame(as.matrix(otu_table(ps.coral.Fishbay)))
+  #27 obs of 16732 variables
+asv_abundance <- asv_abundance[, colSums(asv_abundance != 0) > 0]
+  #27 obs of 1811 variables 
+  ### this is a huge number of ASVs, which I hope isn't bad.
+
+# Calculate the total abundance of ASVs per sample
+sample_total_abundance <- colSums(asv_abundance)
+
+# Sort the samples by total abundance in descending order
+sorted_samples <- sample_total_abundance[order(sample_total_abundance, decreasing = TRUE)]
+head(sorted_samples)
+top_20_asvs <- names(sorted_samples[1:20])
+
+# Get the top 20 most abundant ASVs
+top_20_asvs_samples <- asv_abundance[, top_20_asvs]
+top_20_asvs_samples$Sample_names <- row.names(top_20_asvs_samples)
+```
+
+```{r}
+# Get unique values in the specified category
+meta_top20 <- META[top_20_asvs_samples$Sample_names]
+
+taxa_top20 <- as.data.frame(taxa[top_20_asvs,])
+taxa_top20$ASV_ID <- row.names(taxa_top20)
+taxa_top20 <- taxa_top20 %>% arrange(ASV_ID)
+
+write.csv(taxa_top20, "Top20_ASV_FishBay_Corals")
+ 
+
+
+#Combine the data frames into one
+data_frame_merge <- merge(meta_top20, top_20_asvs_samples,
+                          by = 'row.names', all = TRUE)
+
+#Reshape the data into long format
+long_df_FB <- data_frame_merge %>% pivot_longer(
+                    cols=starts_with("ASV"),
+                    names_to='ASV_ID',
+                    values_to='ASV_prop') %>% 
+                    arrange(ASV_ID)
+
+mean_per_sample_FB <- long_df %>% 
+                  group_by(Sample_ID) %>%
+                  summarise(mean = mean(ASV_prop),
+                            SD = sd(ASV_prop),
+                            sum = sum(ASV_prop))
+    # min sum =  0.0006263947, max sum = 0.8401479596
+
+total_mean_FB <- mean_per_sample_FB %>%
+              summarise(mean = mean(sum),
+                        SD = sd(sum))
+    # mean = 0.2856075, SD = 0.2494254
+
+
+
+palette20 <- c("#C5EC8A",  "#6EB3EB",  "#4CEADD", "#ECF143", "#C571D9", "#962BEF"  , "#DFA643",    "#E64A8A", "#55AE62", "#E45F4E", "#E17FAD", "#61E97D", "#E9D2A9", "#6B6E7F", "#E33EE6", "#ACAA51", "#A5D4E8",  "#BC9DE1",  "#6765F0", "#B99299")
+
+
+
+
+
+ggplot(long_df, aes(x=Date, y=ASV_prop, fill=ASV_ID)) + 
+  geom_bar(stat="identity", position="stack") + 
+  facet_grid(~Tag, scale="free") +
+  scale_fill_manual(values=palette20) +
+  theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  labs(title = "Top 20 ASVs from Corals from Fish Bay") +
+  xlab(" ")
+#%#%#%#%
+
+
+```
+Top20ASVsfromCoralsfromFishBay
+
+
+
+
+
+
+#20 most abundant AVS  -- Seawater from Fish Bay
+```{r}
+asv_abundance <- as.data.frame(as.matrix(otu_table(ps.seawater.Fishbay)))
+  #31 obs of 16732 variables
+asv_abundance <- asv_abundance[, colSums(asv_abundance != 0) > 0]
+  #31 obs of 4989 variables 
+  
+# Calculate the total abundance of ASVs per sample
+sample_total_abundance <- colSums(asv_abundance)
+
+# Sort the samples by total abundance in descending order
+sorted_samples <- sample_total_abundance[order(sample_total_abundance, decreasing = TRUE)]
+head(sorted_samples)
+top_20_asvs <- names(sorted_samples[1:20])
+
+# Get the top 20 most abundant ASVs
+top_20_asvs_samples <- asv_abundance[, top_20_asvs]
+top_20_asvs_samples$Sample_names <- row.names(top_20_asvs_samples)
+```
+
+```{r}
+# Get unique values in the specified category
+meta_top20 <- META[top_20_asvs_samples$Sample_names]
+
+taxa_top20 <- as.data.frame(taxa[top_20_asvs,])
+taxa_top20$ASV_ID <- row.names(taxa_top20)
+taxa_top20 <- taxa_top20 %>% arrange(ASV_ID)
+
+write.csv(taxa_top20, "Top20_ASV_FishBay_SW.csv")
+ 
+
+
+#Combine the data frames into one
+data_frame_merge <- merge(meta_top20, top_20_asvs_samples,
+                          by = 'row.names', all = TRUE)
+
+write.csv(data_frame_merge, "Top20_Short_FB_SW.csv")
+
+#Reshape the data into long format
+long_df <- data_frame_merge %>% pivot_longer(
+                    cols=starts_with("ASV"),
+                    names_to='ASV_ID',
+                    values_to='ASV_prop') %>% 
+                    arrange(ASV_ID)
+
+
+
+palette20 <- c("#C5EC8A",  "#6EB3EB",  "#4CEADD", "#ECF143", "#C571D9", "#962BEF"  , "#DFA643",    "#E64A8A", "#55AE62", "#E45F4E", "#E17FAD", "#61E97D", "#E9D2A9", "#6B6E7F", "#E33EE6", "#ACAA51", "#A5D4E8",  "#BC9DE1",  "#6765F0", "#B99299")
+
+
+
+
+
+ggplot(long_df, aes(x=Date, y=ASV_prop, fill=ASV_ID)) + 
+  geom_bar(stat="identity", position="stack") + 
+  facet_grid(~Tag, scale="free") +
+  scale_fill_manual(values=palette20) +
+  theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  labs(title = "Top 20 ASVs from Seawater from Fish Bay") +
+  xlab(" ")
+#%#%#%#%
+
+
+```
+Top20ASVsfromSWfromFishBay
+
+
+
+
+
+
+
+#20 most abundant AVS  -- Coral from Coral Bay
+```{r}
+asv_abundance <- as.data.frame(as.matrix(otu_table(ps.Coral.Coralbay)))
+  #30 obs of 19353 variables
+asv_abundance <- asv_abundance[, colSums(asv_abundance != 0) > 0]
+  #30 obs of 4612 variables 
+  
+# Calculate the total abundance of ASVs per sample
+sample_total_abundance <- colSums(asv_abundance)
+
+# Sort the samples by total abundance in descending order
+sorted_samples <- sample_total_abundance[order(sample_total_abundance, decreasing = TRUE)]
+head(sorted_samples)
+top_20_asvs <- names(sorted_samples[1:20])
+
+# Get the top 20 most abundant ASVs
+top_20_asvs_samples <- asv_abundance[, top_20_asvs]
+top_20_asvs_samples$Sample_names <- row.names(top_20_asvs_samples)
+```
+
+```{r}
+# Get unique values in the specified category
+meta_top20 <- META[top_20_asvs_samples$Sample_names]
+
+taxa_top20 <- as.data.frame(taxa[top_20_asvs,])
+taxa_top20$ASV_ID <- row.names(taxa_top20)
+taxa_top20 <- taxa_top20 %>% arrange(ASV_ID)
+
+write.csv(taxa_top20, "Top20_ASV_CoralBay_Coral")
+ 
+
+
+#Combine the data frames into one
+data_frame_merge <- merge(meta_top20, top_20_asvs_samples,
+                          by = 'row.names', all = TRUE)
+
+#Reshape the data into long format
+long_df_CB <- data_frame_merge %>% pivot_longer(
+                    cols=starts_with("ASV"),
+                    names_to='ASV_ID',
+                    values_to='ASV_prop') %>% 
+                    arrange(ASV_ID)
+
+
+mean_per_sample_CB <- long_df %>% 
+                  group_by(Sample_ID) %>%
+                  summarise(mean = mean(ASV_prop),
+                            SD = sd(ASV_prop),
+                            sum = sum(ASV_prop))
+    # min sum =  0.000000000, max sum = 0.840373680
+
+total_mean_CB <- mean_per_sample_CB %>%
+              summarise(mean = mean(sum),
+                        SD = sd(sum))
+    # mean = 0.283503, SD = 0.2870451
+
+
+mean_per_sample_CBandFB <- rbind(mean_per_sample_CB, mean_per_sample_FB)
+
+total_mean_CB_and_FB <- mean_per_sample_CBandFB %>%
+              summarise(mean = mean(sum),
+                        SD = sd(sum))
+    # mean = 0.2844999, SD = 0.2674968
+
+
+palette20 <- c("#C5EC8A",  "#6EB3EB",  "#4CEADD", "#ECF143", "#C571D9", "#962BEF"  , "#DFA643",    "#E64A8A", "#55AE62", "#E45F4E", "#E17FAD", "#61E97D", "#E9D2A9", "#6B6E7F", "#E33EE6", "#ACAA51", "#A5D4E8",  "#BC9DE1",  "#6765F0", "#B99299")
+
+
+
+
+
+ggplot(long_df, aes(x=Date, y=ASV_prop, fill=ASV_ID)) + 
+  geom_bar(stat="identity", position="stack") + 
+  facet_grid(~Tag, scale="free") +
+  scale_fill_manual(values=palette20) +
+  theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  labs(title = "Top 20 ASVs from Coral from Coral Bay") +
+  xlab(" ")
+#%#%#%#%
+
+
+```
+Top20ASVsfromCoralfromCoralBay
+
+
+
+
+
+
+
+
+
+
+
+#20 most abundant AVS  -- Seawater from Coral Bay
+```{r}
+asv_abundance <- as.data.frame(as.matrix(otu_table(ps.Seawater.Coralbay)))
+  #35 obs of 19353 variables
+asv_abundance <- asv_abundance[, colSums(asv_abundance != 0) > 0]
+  #35 obs of 7606 variables 
+  
+# Calculate the total abundance of ASVs per sample
+sample_total_abundance <- colSums(asv_abundance)
+
+# Sort the samples by total abundance in descending order
+sorted_samples <- sample_total_abundance[order(sample_total_abundance, decreasing = TRUE)]
+head(sorted_samples)
+top_20_asvs <- names(sorted_samples[1:20])
+
+# Get the top 20 most abundant ASVs
+top_20_asvs_samples <- asv_abundance[, top_20_asvs]
+top_20_asvs_samples$Sample_names <- row.names(top_20_asvs_samples)
+```
+
+```{r}
+# Get unique values in the specified category
+meta_top20 <- META[top_20_asvs_samples$Sample_names]
+
+taxa_top20 <- as.data.frame(taxa[top_20_asvs,])
+taxa_top20$ASV_ID <- row.names(taxa_top20)
+taxa_top20 <- taxa_top20 %>% arrange(ASV_ID)
+
+write.csv(taxa_top20, "Top20_ASV_CoralBay_SW")
+ 
+
+
+#Combine the data frames into one
+data_frame_merge <- merge(meta_top20, top_20_asvs_samples,
+                          by = 'row.names', all = TRUE)
+
+write.csv(data_frame_merge, "Top20_Short_CB_SW.csv")
+
+#Reshape the data into long format
+long_df <- data_frame_merge %>% pivot_longer(
+                    cols=starts_with("ASV"),
+                    names_to='ASV_ID',
+                    values_to='ASV_prop') %>% 
+                    arrange(ASV_ID)
+
+
+
+palette20 <- c("#C5EC8A",  "#6EB3EB",  "#4CEADD", "#ECF143", "#C571D9", "#962BEF"  , "#DFA643",    "#E64A8A", "#55AE62", "#E45F4E", "#E17FAD", "#61E97D", "#E9D2A9", "#6B6E7F", "#E33EE6", "#ACAA51", "#A5D4E8",  "#BC9DE1",  "#6765F0", "#B99299")
+
+
+
+
+
+ggplot(long_df, aes(x=Date, y=ASV_prop, fill=ASV_ID)) + 
+  geom_bar(stat="identity", position="stack") + 
+  facet_grid(~Tag, scale="free") +
+  scale_fill_manual(values=palette20) +
+  theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  labs(title = "Top 20 ASVs from SW from Coral Bay") +
+  xlab(" ")
+#%#%#%#%
+
+
+```
+Top20ASVsfromSWfromCoralBay
+
+
+
+#Bubble plots
+#Fish Bay_ SW
+```{r}
+asv_abundance <- as.data.frame(as.matrix(otu_table(ps.seawater.Fishbay)))
+ #29 obs of 16848 variables
+meta_forBubble <- sample_data(ps.seawater.Fishbay)
+
+ASVofInterst <- c("ASV29", "ASV3", "ASV48", "ASV54", "ASV9" )
+asv_abun_ofInterest <- asv_abundance[, ASVofInterst]
+asv_abun_ofInterest$Sample_names <- row.names(asv_abun_ofInterest)
+
+combo_data <- cbind(asv_abun_ofInterest, meta_forBubble)
+
+colNeeded <- c("ASV29", "ASV3", "ASV48", "ASV54", "ASV9", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered")
+combo_data <- combo_data[,colNeeded]
+
+#48
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV48, 
+          color = Healthy_Diseased_Recovered)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 48 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+#54
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV54, 
+          color = Healthy_Diseased_Recovered)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 54 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+#9
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV9, 
+          color = Healthy_Diseased_Recovered)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 9 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+#3
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV3, 
+          color = Healthy_Diseased_Recovered)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 3 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+#29
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV29, 
+          color = Healthy_Diseased_Recovered)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 29 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+combo_data$Tag
+```
+
+
+
+#Coral Bay_ SW
+```{r}
+asv_abundance <- as.data.frame(as.matrix(otu_table(ps.Seawater.Coralbay)))
+ #29 obs of 19558 variables
+meta_forBubble <- sample_data(ps.Seawater.Coralbay)
+
+ASVofInterst <- c("ASV29", "ASV3", "ASV48", "ASV54", "ASV9" )
+asv_abun_ofInterest <- asv_abundance[, ASVofInterst]
+asv_abun_ofInterest$Sample_names <- row.names(asv_abun_ofInterest)
+
+combo_data <- cbind(asv_abun_ofInterest, meta_forBubble)
+
+colNeeded <- c("ASV29", "ASV3", "ASV48", "ASV54", "ASV9", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered", "Site_Disease")
+combo_data <- combo_data[,colNeeded]
+
+#48
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV48, 
+          color = Site_Disease)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 48 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+#54
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV54, 
+          color = Site_Disease)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 54 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+#9
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV9, 
+          color = Site_Disease)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 9 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+#3
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV3, 
+          color = Site_Disease)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 3 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+#29
+ggplot(combo_data,
+       aes(x = Date, 
+           y = Tag,
+           size = ASV29, 
+          color = Site_Disease)) +
+  geom_point()+
+  labs(x = "Date", y = "Colony Tag", title = "ASV 29 Relative Abundance") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+combo_data$Tag
+```
+
+
+
+
+
+
+
+
+
