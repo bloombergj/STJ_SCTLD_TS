@@ -5,9 +5,9 @@ date: "5/27/2023"
 output: html_document
 ---
 
-
+#Set up
 ```{r setup, include=FALSE}
-setwd("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code")
+setwd("~/Documents/WHOI/Projects/STJ_SCTLD_TS")
 ```
 
 ```{r}
@@ -45,11 +45,99 @@ library(microbiomeutilities)
 
 ```
 
+#Upload data
+```{r}
+load("~/Documents/WHOI/Projects/STJ_SCTLD_TS/otus_SCTSCTLDTD_J1N2V2_final.RData")
+
+taxa <- as.matrix(read.table("taxonomy_SCTSCTLDTD_J1N2V2_final.txt", sep = "\t", row.names = 1, header = TRUE))
+
+ASV_ID <-read.table("ASVsequences_SCTSCTLDTD_J1N2V2_final.txt", sep = "\t", row.names = 1, header = TRUE)
+
+metadata <- read.csv("meta_table.csv", header = TRUE)
+```
+
+#Removes <10,000 reads
+Added this processing on Nov. 3, 2023 (orginially in DADA2_STJ_SCTLD_Timeseries_Aug2023.Rmd, but made more sense to me to put it here this time.)
+This code is for a special case. In the field, one syringe of seawater was filtered through two different filters, so they the two sequences are actually representative of one sample. I will combine the two samples into one. 
+```{r}
+#SW 32 and SW 33 are the same water sample, split between two filters
+#So I am going to combine the counts from SW-33 to SW-32
+head(otus["SW-32",])
+  # ASV1 ASV2 ASV3 ASV4 ASV5 ASV6 
+  # 882   20   79    0   59   25 
+head(otus["SW-33",])
+  # ASV1 ASV2 ASV3 ASV4 ASV5 ASV6 
+  # 99    0    0    0    0    0 
+
+otus["SW-32",] <- otus["SW-32",] + otus["SW-33",]
+head(otus["SW-32",])
+    # ASV1 ASV2 ASV3 ASV4 ASV5 ASV6 
+    # 981   20   79    0   59   25 
+    # OK I think it worked, now I have to remove sample 33 from every phyloseq with Fish Bay Seawater
+```
+
+
+-------------------this is as far as I got on 8/21/24
+
+Goal: remove samples with less than 10,000 reads
+```{r}
+keep <- rowSums(otus[,]) >= 10000
+
+removed <- rowSums(otus[,]) < 10000
+
+Samples_removed <- as.data.frame(removed[removed == TRUE])
+
+otus_noLowReads <- otus[keep,]
+
+cat(sum(removed, na.rm = TRUE), 'samples were removed because they had less than 10000 sequences.\n')
+
+cat(sum(keep, na.rm = TRUE), 'samples have sufficient reads and thus, remain in the dataset.\n')
+```
+The non-control samples that are removed are: 
+Coral 11 --> losing 
+SW 33 --> this is a half sample with SW-32, so not losing a data point
+SW 34 --> this has a duplicate, so not losing a data point
+SW 42 --> this has a duplicate, so not losing a data point
+SW 9 --> losing
+
+
+Some of the samples have duplicates, so I want to pick which duplicate is better to process. 
+I am choosing the sample with more reads, but I think it only matters when there are orders
+of magnitudes in difference. 
+  ^^ I think this isn't what I'm supposed to do with these samples, talk to Amy (note on 8/21/24)
+```{r}
+TotalReads <- as.data.frame(rowSums(otus_noLowReads[,]))
+
+#Going to remove: 
+#  Coral_52_1_ACTCACTG
+#  SW-26
+#  SW-35
+#  SW-8duplicate
+
+duplicates_toRemove <- c("Coral_52_1_ACTCACTG", "SW-26", "SW-35", "SW-8duplicate")
+
+otus_noDuplicates <- otus_noLowReads[!(rownames(otus_noLowReads) %in% duplicates_toRemove),]
+
+dim(otus)
+  # 164 20481
+dim(otus_noLowReads)
+  # 143 20481
+dim(otus_noDuplicates)
+  # 139 20481
+
+
+
+save(otus_noDuplicates, file="~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/otus_STJSCTLD_final.RData")
+
+
+```
+
+
+
+
+
 
 ```{r}
-#Upload data
-load("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/otus_STJSCTLD_final.RData")
-
 otus <- otus_noDuplicates
 samples_we_use <- row.names(otus)
 ASV <- as.matrix(otus)
