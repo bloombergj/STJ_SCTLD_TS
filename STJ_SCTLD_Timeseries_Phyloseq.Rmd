@@ -54,11 +54,14 @@ taxa <- as.matrix(read.table("taxonomy_SCTSCTLDTD_J1N2V2_final.txt", sep = "\t",
 ASV_ID <-read.table("ASVsequences_SCTSCTLDTD_J1N2V2_final.txt", sep = "\t", row.names = 1, header = TRUE)
 
 metadata <- read.csv("meta_table.csv", header = TRUE)
+metadata <- metadata[,1:24]
+row.names(metadata) <- metadata$Sample_names
+
 ```
 
 #Removes <10,000 reads
 Added this processing on Nov. 3, 2023 (orginially in DADA2_STJ_SCTLD_Timeseries_Aug2023.Rmd, but made more sense to me to put it here this time.)
-This code is for a special case. In the field, one syringe of seawater was filtered through two different filters, so they the two sequences are actually representative of one sample. I will combine the two samples into one. 
+This code is for a special case. In the field, one syringe of seawater was filtered through two different filters, so the the two sequences are actually representative of one sample. I will combine the two samples into one. 
 ```{r}
 #SW 32 and SW 33 are the same water sample, split between two filters
 #So I am going to combine the counts from SW-33 to SW-32
@@ -77,8 +80,6 @@ head(otus["SW-32",])
 ```
 
 
--------------------this is as far as I got on 8/21/24
-
 Goal: remove samples with less than 10,000 reads
 ```{r}
 keep <- rowSums(otus[,]) >= 10000
@@ -90,140 +91,120 @@ Samples_removed <- as.data.frame(removed[removed == TRUE])
 otus_noLowReads <- otus[keep,]
 
 cat(sum(removed, na.rm = TRUE), 'samples were removed because they had less than 10000 sequences.\n')
+  # 25 samples were removed because they had less than 10000 sequences.
+  # (but of these, 19 are negative controls)
 
 cat(sum(keep, na.rm = TRUE), 'samples have sufficient reads and thus, remain in the dataset.\n')
+  # 194 samples have sufficient reads and thus, remain in the dataset.
 ```
 The non-control samples that are removed are: 
 Coral 11 --> losing 
+Coral 107 --> losing
 SW 33 --> this is a half sample with SW-32, so not losing a data point
 SW 34 --> this has a duplicate, so not losing a data point
 SW 42 --> this has a duplicate, so not losing a data point
 SW 9 --> losing
 
 
+#Remove duplicates
+
 Some of the samples have duplicates, so I want to pick which duplicate is better to process. 
-I am choosing the sample with more reads, but I think it only matters when there are orders
-of magnitudes in difference. 
+I am choosing the sample with more reads, but I think it only matters when there are orders of magnitudes in difference. 
   ^^ I think this isn't what I'm supposed to do with these samples, talk to Amy (note on 8/21/24)
 ```{r}
 TotalReads <- as.data.frame(rowSums(otus_noLowReads[,]))
 
+#Manually checked which samples has more reads for each remaining duplicate
 #Going to remove: 
-#  Coral_52_1_ACTCACTG
+#  Coral_52_1
 #  SW-26
 #  SW-35
 #  SW-8duplicate
 
-duplicates_toRemove <- c("Coral_52_1_ACTCACTG", "SW-26", "SW-35", "SW-8duplicate")
+duplicates_toRemove <- c("Coral_52_1", "SW-26", "SW-35", "SW-8duplicate")
 
 otus_noDuplicates <- otus_noLowReads[!(rownames(otus_noLowReads) %in% duplicates_toRemove),]
 
 dim(otus)
-  # 164 20481
+  # 219 23901
 dim(otus_noLowReads)
-  # 143 20481
+  # 194 23901
 dim(otus_noDuplicates)
-  # 139 20481
-
-
-
-save(otus_noDuplicates, file="~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/otus_STJSCTLD_final.RData")
-
-
+  # 190 23901
 ```
 
 
-
-
-
+Ok now I am going to cut down the meta data so that it only includes the samples I am using going forward -- i.e. without samples with low read yields and without duplicates
 
 ```{r}
 otus <- otus_noDuplicates
 samples_we_use <- row.names(otus)
 ASV <- as.matrix(otus)
 
-
-
-taxa <- as.matrix(read.table("taxonomy_STJSCTLD_final.txt", sep = "\t", row.names = 1, header = TRUE))
-
-ASV_ID <-read.table("ASVsequences_STJSCTLD_final.txt", sep = "\t", row.names = 1, header = TRUE)
-
-metadata <- read.csv("meta_table.csv", header = TRUE)
-metadata <- metadata[1:164, 1:24]
-row.names(metadata) <- metadata$Sample_names
 metadata <- metadata[samples_we_use, ]
-
-#metadata$Date_nice <- as.Date(metadata$Date , format = "%Y/%m/%d")
 
 ```
 
 
+#Make base phyloseq object 
 
 ```{r}
-# Make a phyloseq object. Corncob works with these. 
+# Make a phyloseq object. 
 ASV = otu_table(ASV, taxa_are_rows = FALSE)
 TAX = tax_table(taxa)
 META = sample_data(metadata)
 
 ps <- phyloseq(ASV, TAX, META)
-  #taxa: 20481
-  #samples: 139
-
+  #taxa: 23901
+  #samples: 190
 
 #remove contaminants
-load("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/contam.RData")
+load("~/Documents/WHOI/Projects/STJ_SCTLD_TS/contam.RData")
 
 ps.decontam <- prune_taxa(!contam$contaminant, ps)#went from 20481 taxa to 20430 taxa
-  #taxa: 20430
-  #samples: 139
+  #taxa: 23857
+  #samples: 190
 
-#remove ASVS with all zeros
-ps.decontam.nozero <- filter_taxa(ps.decontam, function(x) sum(x) > 0, TRUE)
-  #taxa: 20125 taxa
-  #samples: 139
+#remove ASVS that are mitochondria or chloroplasts
+ps.decontam.nomitochloro <- ps.decontam %>%
+    subset_taxa(Family !="Mitochondria" & Order !="Chloroplast")
+  #taxa: 23532
+  #samples: 190
 
-    paste("Number of ASVs in the dataset (without contaminants) prior to removing ASVs not present in any sample =", ntaxa(ps.decontam))
-      #20430
-    paste("Number of ASVs in the dataset (without contaminants) after removing ASVs not present in any sample =", ntaxa(ps.decontam.nozero))
-      #20125
-    paste("the number of ASVs not present in any sample that were removed =", ntaxa(ps.decontam)-ntaxa(ps.decontam.nozero))
-      #305
+#remove ASVS with all zeros 
+ps.decontam.nozero <- filter_taxa(ps.decontam.nomitochloro, function(x) sum(x) > 0, TRUE)
+  #taxa: 22313 
+  #samples: 190
     
-#Remove the samples I don't want to use: (14 samples removed)
-    #Coral_48 --> only diseased sample at Coral Bay
-    #Seawater_61 --> only diseased sample at Coral Bay
-    #Seawater_68 --> only dead sample at Coral Bay
-    #Tag 1534 (4 samples)
-    #Tag 2300 (2 samples)
-    #HealthState DH (4) --> only going to remove these for coral samples, not SW
+#Remove the samples I don't want to use: (11 samples removed)
+    #Tag 1633 (only one sampling date; 4 additional samples)
+    #Tag bonus (only one sampling date; 2 additional samples)
+    #Tag 3979 (only one sampling date; 1 additional sample)
+    #HealthState DH for coral samples (3 additional coral samples; DH ok for seawater)
+        # C-105
+        # Coral_18
+        # C-116
  
  ps.decontam.filt <- ps.decontam.nozero %>%
-    subset_samples(Sample_ID !="Coral_48" & 
-                   Sample_ID !="Seawater_61" &
-                   Sample_ID !="Seawater_68" & 
-                   Tag !="1534" & 
-                   Tag !="2300")
-                   
-    
-  #taxa: 20125 taxa
-  #samples: 130
-       
-  ps.nocontrol.nomirochloro <- ps.decontam.nozero %>%
-    subset_samples(Sample_ID !="Coral_48" & 
-                   Sample_ID !="Seawater_61" &
-                   Sample_ID !="Seawater_68" & 
-                   Tag !="1534" & 
-                   Tag !="2300") %>%
-                   subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>%
-                   subset_samples(Sample_Type != "Coral")
+    subset_samples(Sample_ID !="C-105" & 
+                   Sample_ID !="Coral_18" &
+                   Sample_ID !="C-116" & 
+                   Tag !="1633" & 
+                   Tag !="bonus" & 
+                   Tag !="3979")
+  #taxa: 22313 taxa
+  #samples: 180
+   
+
+ Reads_per_sample <- as.data.frame(sample_sums(ps.decontam.filt))
+ mean(Reads_per_sample$`sample_sums(ps.decontam.filt)`)  #64920.33
+ sd(Reads_per_sample$`sample_sums(ps.decontam.filt)`)  #64443.98
+ sum(Reads_per_sample$`sample_sums(ps.decontam.filt)`) #11685660
  
- Reads_per_sample <- as.data.frame(sample_sums(ps.nocontrol.nomirochloro))
- mean(Reads_per_sample$`sample_sums(ps.nocontrol.nomirochloro)`)  #85306.06
- sd(Reads_per_sample$`sample_sums(ps.nocontrol.nomirochloro)`)  #46542.01
- sum(Reads_per_sample$`sample_sums(ps.nocontrol.nomirochloro)`)
+write.csv(Reads_per_sample, file = "Reads_per_sample.csv")
 ```
 
-Sums_all <- as.data.frame(rowSums(otu_table(ps.decontam.nozero)))
+I should talk to Amy about post-processing cut off for sample reads, because there are 14 more samples that have >10,000 reads.... ugh (see Reads_per_sample)
 
 
 #phyloseq obejct with coral and seawater from both sites
@@ -294,7 +275,6 @@ ps.coral.Fishbay <- ps.decontam.filt %>%
   transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
   subset_samples(Sample_Type == "Coral") %>% #subset coral samples
   subset_samples(Site == "Fish_Bay") %>%
-  subset_samples(HealthState != "DH") %>%
   subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>% 
   filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
 ```
@@ -347,10 +327,10 @@ perm.C.FB.HDR
 
 
     #      Number of permutations: 999
-    #                                Df SumOfSqs     R2      F Pr(>F)  
-    #      Healthy_Diseased_Recovered  2   1.1282 0.0911 1.2027  0.019 *
-    #      Residual                   24  11.2563 0.9089                
-    #      Total                      26  12.3845 1.0000  
+    #                            Df SumOfSqs      R2      F Pr(>F)  
+    # Healthy_Diseased_Recovered  2   1.0586 0.05435 1.1207  0.053 .
+    # Residual                   39  18.4191 0.94565                
+    # Total                      41  19.4777 1.00000       
 
 
 plot2B <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", color="Date") +
@@ -375,11 +355,10 @@ legend_2Date <- as_ggplot(legend_2Date)
 
 perm.C.FB.date <- adonis2(distance(ps.coral.Fishbay, method="bray") ~ Date, data = Coral_FishBay_metadata)
 perm.C.FB.date 
-    #   Number of permutations: 999
-    #             Df SumOfSqs      R2      F Pr(>F)  
-    #    Date      6   3.0436 0.24576 1.0861  0.048 *
-    #    Residual 20   9.3409 0.75424                
-    #    Total    26  12.3845 1.00000                
+    #          Df SumOfSqs      R2      F Pr(>F)   
+    # Date     10   5.1073 0.26221 1.1018  0.002 **
+    # Residual 31  14.3704 0.73779                 
+    # Total    41  19.4777 1.00000                  
      
 
 plot3 <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", shape ="Healthy_Diseased_Recovered", color = "Date") +
@@ -450,10 +429,9 @@ perm.SW.FB.HDR <- adonis2(distance(ps.seawater.Fishbay, method="bray") ~ Healthy
 perm.SW.FB.HDR 
 
     #    Number of permutations: 999
-    #                                  Df SumOfSqs      R2      F Pr(>F)  
-    #      Healthy_Diseased_Recovered  3   1.3104 0.26819 3.2982  0.016 *
-    #      Residual                   27   3.5758 0.73181                
-    #      Total                      30   4.8862 1.00000  
+    # Healthy_Diseased_Recovered  3   1.0142 0.15708 2.671  0.008 **
+    # Residual                   43   5.4427 0.84292                
+    # Total                      46   6.4570 1.00000   
 
 
 
@@ -477,10 +455,9 @@ perm.SW.FB.date <- adonis2(distance(ps.seawater.Fishbay, method="bray") ~ Date, 
 perm.SW.FB.date 
 
     #    Number of permutations: 999
-    #             Df SumOfSqs      R2     F Pr(>F)   
-    #    Date      6   2.0039 0.41012 2.781  0.002 **
-    #    Residual 24   2.8823 0.58988                
-    #    Total    30   4.8862 1.0000
+    # Date     10   3.3112 0.51281 3.7894  0.001 ***
+    # Residual 36   3.1458 0.48719                  
+    # Total    46   6.4570 1.00000 
 
 
 
@@ -542,6 +519,21 @@ plot1C <- plot_ordination(ps.Seawater.Coralbay, SW.CoralBay.ord , type="samples"
 legend_ReefHealthState <- get_legend(plot1C)
 legend_ReefHealthState <- as_ggplot(legend_ReefHealthState)
 
+# seawater from coral bay with HDR health state
+# plot_ordination(ps.Seawater.Coralbay, SW.CoralBay.ord , type="samples", color="Healthy_Diseased_Recovered") +
+#   geom_point(size = 4, aes(color = factor(Healthy_Diseased_Recovered))) +
+#   theme(text=element_text(size=17),
+#         legend.text=element_text(size=17),
+#         panel.grid = element_blank(),
+#         axis.text = element_text(size = 17),
+#         legend.position = "bottom",
+#         legend.direction ="vertical",
+#         plot.margin = unit(c(0.5, 0.5, 0, 0), "cm")) +
+#   guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+#   labs(color = "Coral health state", tag = "C") +
+#   scale_color_manual(breaks=c("Healthy", "Diseased", "Recovered", "Dead"),
+#                        values = c("mediumseagreen", "darkorange2", "darkorchid3", "gray50"))
+
 
 
 SW_CoralBay_metadata <- data.frame(sample_data(ps.Seawater.Coralbay))
@@ -550,9 +542,9 @@ perm.SW.CB.HDR
 
     #       Number of permutations: 999
     #                         Df SumOfSqs      R2      F Pr(>F)   
-    #        Site_Disease  1  0.38847 0.17202 6.8558  0.001 ***
-    #        Residual     33  1.86989 0.82798                  
-    #        Total        34  2.25837 1.00000  
+    # Site_Disease  1   0.3652 0.10925 5.2738  0.001 ***
+    # Residual     43   2.9780 0.89075                  
+    # Total        44   3.3432 1.00000    
 
 
 
@@ -579,10 +571,9 @@ perm.SW.CB.date <- adonis2(distance(ps.Seawater.Coralbay, method="bray") ~ Date,
 perm.SW.CB.date 
 
   #      Number of permutations: 999
-  #               Df SumOfSqs      R2     F Pr(>F)    
-  #      Date      7  1.92057 0.85043 21.93  0.001 ***
-  #      Residual 27  0.33779 0.14957                 
-  #      Total    34  2.25837 1.00000   
+  # Date     11   2.8474 0.85168 17.227  0.001 ***
+  # Residual 33   0.4959 0.14832                  
+  # Total    44   3.3432 1.00000      
 
 
 ```
@@ -631,6 +622,23 @@ plot1A <- plot_ordination(ps.Coral.Coralbay, Coral.CoralBay.ord , type="samples"
                        labels = c("Before SCTLD arrived", "After SCTLD arrived")) 
 
 
+#coral from coral bay with HDR health state
+ # plot_ordination(ps.Coral.Coralbay, Coral.CoralBay.ord , type="samples", color="Healthy_Diseased_Recovered") +
+ #  geom_point(size = 4, aes(color = factor(Healthy_Diseased_Recovered))) +
+ #  theme(text=element_text(size=17),  
+ #        legend.text=element_text(size=17), 
+ #        panel.grid = element_blank(), 
+ #        axis.text = element_text(size = 17), 
+ #        legend.position = "bottom", 
+ #        legend.direction ="vertical", 
+ #        plot.margin = unit(c(0.5, 0.5, 0, 0), "cm")) +
+ #  guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
+ #  labs(color = "Coral health state", tag = "C") +
+ #  scale_color_manual(breaks=c("Healthy", "Diseased", "Recovered", "Dead"), 
+ #                       values = c("mediumseagreen", "darkorange2", "darkorchid3", "gray50")) 
+
+
+
 
 
 Coral_CoralBay_metadata <- data.frame(sample_data(ps.Coral.Coralbay))
@@ -638,10 +646,10 @@ perm.C.CB.HDR <- adonis2(distance(ps.Coral.Coralbay, method="bray") ~ Site_Disea
 perm.C.CB.HDR 
 
   #        Number of permutations: 999
-  #                         Df SumOfSqs      R2      F Pr(>F)
-  #          Site_Disease  1    0.540 0.03907 1.1384   0.14
-  #          Residual     28   13.282 0.96093              
-  #          Total        29   13.822 1.00000 
+  #              Df SumOfSqs      R2      F Pr(>F)   
+  # Site_Disease  1   0.6044 0.03696 1.2664  0.007 **
+  # Residual     33  15.7486 0.96304                 
+  # Total        34  16.3530 1.00000 
 
 
 
@@ -663,9 +671,9 @@ perm.C.CB.date
 
       #    Number of permutations: 999
       #             Df SumOfSqs      R2      F Pr(>F)  
-      #    Date      6   3.2359 0.23411 1.1717  0.015 *
-      #    Residual 23  10.5861 0.76589                
-      #    Total    29  13.8220 1.00000  
+      # Date     10    5.272 0.32239 1.1419  0.001 ***
+      # Residual 24   11.081 0.67761                  
+      # Total    34   16.353 1.00000   
 
 ```
 
