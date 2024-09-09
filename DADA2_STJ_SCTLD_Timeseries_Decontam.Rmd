@@ -19,20 +19,18 @@ library("readr")
 ```
 
 ```{r}
-setwd("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code")
-
+setwd("~/STJ_SCTLD_TS_dada2")
 ```
 
 
 ```{r}
-load("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/otus_STJSCTLD_final.RData")
+load("~/STJ_SCTLD_TS_dada2/otus_SCTSCTLDTD_J1N2V2_final.RData")
 
-meta <- read.csv("meta_table.csv", header = TRUE)
-meta <- meta[1:164, 1:16]
+meta <- read.csv("meta_table_learnerror.csv", header = TRUE)
 
-taxonomy <- read.delim("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/taxonomy_STJSCTLD_final.txt")
+taxonomy <- read.delim("~/STJ_SCTLD_TS_dada2/taxonomy_SCTSCTLDTD_J1N2V2_final.txt")
 
-ASVsequence <- read.delim("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/ASVsequences_STJSCTLD_final.txt")
+ASVsequence <- read.delim("~/STJ_SCTLD_TS_dada2/ASVsequences_SCTSCTLDTD_J1N2V2_final.txt")
 
 ```
 
@@ -40,7 +38,7 @@ ASVsequence <- read.delim("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperim
 ```{r}
 #How many negative controls are there?
 sum(meta$Sample_Type == "Control") 
-#20
+#27
 ```
 
 
@@ -49,7 +47,7 @@ contam <- isContaminant(otus, neg=meta$Sample_Type %in% "Control", method="preva
 
 ```
 
-save(contam, file="~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Analysis_Code/contam.RData")
+save(contam, file="~/STJ_SCTLD_TS_dada2/contam.RData")
 
 ```{r}
 # We will now augment the contam data.frame with some additional annotations
@@ -93,7 +91,6 @@ histo + facet_wrap(~Prevalence_Binned)
 i.top10 <- order(contam$p, decreasing=TRUE)[1:10]
 contam[i.top10,]
 ```
-
 
 
 

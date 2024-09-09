@@ -9,7 +9,7 @@ editor_options:
 
 Note on using HPC and adjusting setting of sbatch: 
 If I want to edit the slurm run parameters, I can add them in the command line to override the ones in the .sh file:
-sbatch --cpus-per-task=4 --mem=32gb --time=03:10:00 /proj/omics/bioinfo/scripts/slurm/singularity_launch_rstudio.sh
+sbatch --cpus-per-task=4 --mem=64gb --time=03:10:00 /proj/omics/bioinfo/scripts/slurm/singularity_launch_rstudio.sh
 
 Check active job using: sacct
 
@@ -49,7 +49,7 @@ Note -- you can count the number of files in a directory in unix with: "ls -1 | 
 ```{r}
 list.files(path)
 length(list.files(path))
-  #436 -- perfect bc there are 218 samples, and 218*2=436
+  #439 -- perfect bc there are 219 samples, and 219*2=438
 
 ```
 
@@ -63,7 +63,7 @@ I got the following code from: https://people.ucsc.edu/~claraqin/process-16s-seq
 
 ```{r}
 meta <- read.csv("meta_table_learnerror.csv", header = TRUE)
-meta <- meta[1:218, 1:6]
+#meta <- meta[1:219, 1:6]
 
 #Make data frames for each error rate group
 unique_runs <- sort(unique(meta$LearnErr_ID))
@@ -80,14 +80,14 @@ meta_4run <- meta[which(meta$LearnErr_ID==unique_runs[4]),]
 nrow(meta_4run) #65
 
 meta_5run <- meta[which(meta$LearnErr_ID==unique_runs[5]),]
-nrow(meta_5run) #26
+nrow(meta_5run) #27
 
 meta_6run <- meta[which(meta$LearnErr_ID==unique_runs[6]),]
 nrow(meta_6run) #28
 
 #make sure I have all my samples covered:
 nrow(meta_1run) + nrow(meta_2run) + nrow(meta_3run) + nrow(meta_4run) + nrow(meta_5run) + nrow(meta_6run) 
-#218, so I'm good!
+#219, so I'm good!
 
 ```
 
@@ -107,19 +107,19 @@ fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
 #ChatGPT explanation of the following code: 
   #This code splits the basename using "_" and then concatenates the first and second elements with "_" as the separator. If there is only one element in the split result, it returns that element as is.
 
-sample.names1 <- sapply(strsplit(basename(fnFs[1:30]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
-sample.names2 <- sapply(strsplit(basename(fnFs[31:32]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], x[3], sep = "_"), x))
-sample.names3 <- sapply(strsplit(basename(fnFs[33:42]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
-sample.names4 <- sapply(strsplit(basename(fnFs[43:95]), "_"), `[`, 1)
-sample.names5 <- sapply(strsplit(basename(fnFs[96:101]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
-sample.names6 <- sapply(strsplit(basename(fnFs[102:103]), "_"), `[`, 1)
-sample.names7 <- sapply(strsplit(basename(fnFs[104]), "-"), `[`, 1)
-sample.names8 <- sapply(strsplit(basename(fnFs[105:168]), "_"), `[`, 1)
-sample.names9 <-  sapply(strsplit(basename(fnFs[169:215]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
-sample.names10 <-  sapply(strsplit(basename(fnFs[216:218]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], x[3], sep = "_"), x))
+sample.names1 <- sapply(strsplit(basename(fnFs[1:31]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
+sample.names2 <- sapply(strsplit(basename(fnFs[32:33]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], x[3], sep = "_"), x))
+sample.names3 <- sapply(strsplit(basename(fnFs[34:43]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
+sample.names4 <- sapply(strsplit(basename(fnFs[44:96]), "_"), `[`, 1)
+sample.names5 <- sapply(strsplit(basename(fnFs[97:102]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
+sample.names6 <- sapply(strsplit(basename(fnFs[103:104]), "_"), `[`, 1)
+sample.names7 <- sapply(strsplit(basename(fnFs[105]), "-"), `[`, 1)
+sample.names8 <- sapply(strsplit(basename(fnFs[106:169]), "_"), `[`, 1)
+sample.names9 <-  sapply(strsplit(basename(fnFs[170:216]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], sep = "_"), x))
+sample.names10 <-  sapply(strsplit(basename(fnFs[217:219]), "_"), function(x) ifelse(length(x) > 1, paste(x[1], x[2], x[3], sep = "_"), x))
 
 sample.names <-c(sample.names1, sample.names2, sample.names3, sample.names4, sample.names5, sample.names6, sample.names7, sample.names8, sample.names9, sample.names10 )
-length(sample.names) #218
+length(sample.names) #219
 
 write.csv(sample.names, file = "sample_names.csv")
 #sample.names <- read.csv("sample_names.csv")
@@ -179,7 +179,7 @@ Pattern = paste(sample.names_5run, collapse="|")
 dat <- data.table(fnFs, result=grepl(Pattern, fnFs))
 fnFs_5run<- dat[dat$result == TRUE,1]
 fnFs_5run <- unlist(fnFs_5run[,1])
-length(fnFs_5run) #26
+length(fnFs_5run) #27
 
 Pattern = paste(sample.names_6run, collapse="|")
 dat <- data.table(fnFs, result=grepl(Pattern, fnFs))
@@ -233,7 +233,7 @@ Pattern = paste(sample.names_5run, collapse="|")
 dat <- data.table(fnRs, result=grepl(Pattern, fnRs))
 fnRs_5run<- dat[dat$result == TRUE,1]
 fnRs_5run <- unlist(fnRs_5run[,1])
-length(fnRs_5run) #26
+length(fnRs_5run) #27
 
 Pattern = paste(sample.names_6run, collapse="|")
 dat <- data.table(fnRs, result=grepl(Pattern, fnRs))
@@ -352,27 +352,27 @@ to curtail this, specify dada2::filterAndTrim(..., multithread = 2) or the numbe
 
 out_1run <- filterAndTrim(fnFs_1run, filtFs_1run, fnRs_1run, filtRs_1run, truncLen=c(240,220),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
-              compress=TRUE, multithread=2) 
+              compress=TRUE, multithread=3) 
 
 out_2run <- filterAndTrim(fnFs_2run, filtFs_2run, fnRs_2run, filtRs_2run, truncLen=c(240,220),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
-              compress=TRUE, multithread=2) 
+              compress=TRUE, multithread=3) 
 
 out_3run <- filterAndTrim(fnFs_3run, filtFs_3run, fnRs_3run, filtRs_3run, truncLen=c(240,220),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
-              compress=TRUE, multithread=2) 
+              compress=TRUE, multithread=3) 
 
 out_4run <- filterAndTrim(fnFs_4run, filtFs_4run, fnRs_4run, filtRs_4run, truncLen=c(240,220),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
-              compress=TRUE, multithread=2) 
+              compress=TRUE, multithread=3) 
 
 out_5run <- filterAndTrim(fnFs_5run, filtFs_5run, fnRs_5run, filtRs_5run, truncLen=c(240,220),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
-              compress=TRUE, multithread=2) 
+              compress=TRUE, multithread=3) 
 
 out_6run <- filterAndTrim(fnFs_6run, filtFs_6run, fnRs_6run, filtRs_6run, truncLen=c(240,220),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
-              compress=TRUE, multithread=2) 
+              compress=TRUE, multithread=3) 
 
 
 ```
@@ -405,17 +405,17 @@ Learn the Error Rates
 #errF <- learnErrors(filtFs, multithread=TRUE)
 
 # Learn errors (F) for each sequencing run
-errF_1run <- learnErrors(filtFs_1run, multithread=3)
+errF_1run <- learnErrors(filtFs_1run, multithread=4)
       #121435440 total bases in 505981 reads from 3 samples will be used for learning the error rates.
-errF_2run <- learnErrors(filtFs_2run, multithread=3)
+errF_2run <- learnErrors(filtFs_2run, multithread=4)
       #105232560 total bases in 438469 reads from 2 samples will be used for learning the error rates.
-errF_3run <- learnErrors(filtFs_3run, multithread=3)
+errF_3run <- learnErrors(filtFs_3run, multithread=4)
       #103181040 total bases in 429921 reads from 24 samples will be used for learning the error rates.
-errF_4run <- learnErrors(filtFs_4run, multithread=3)
+errF_4run <- learnErrors(filtFs_4run, multithread=4)
       #106168560 total bases in 442369 reads from 12samples will be used for learning the error rates.
-errF_5run <- learnErrors(filtFs_5run, multithread=3)
-      #105691200 total bases in 440380 reads from 14 samples will be used for learning the error rates.
-errF_6run <- learnErrors(filtFs_6run, multithread=3)
+errF_5run <- learnErrors(filtFs_5run, multithread=4)
+      #106159200 total bases in 442330 reads from 12 samples will be used for learning the error rates.
+errF_6run <- learnErrors(filtFs_6run, multithread=4)
       #145852080 total bases in 607717 reads from 4 samples will be used for learning the error rates.
 
 
@@ -423,17 +423,17 @@ errF_6run <- learnErrors(filtFs_6run, multithread=3)
 #errR <- learnErrors(filtRs, multithread=TRUE)
 
 # Learn errors (F) for each sequencing run
-errR_1run <- learnErrors(filtRs_1run, multithread=3)
+errR_1run <- learnErrors(filtRs_1run, multithread=4)
     #111315820 total bases in 505981 reads from 3 samples will be used for learning the error rates.
-errR_2run <- learnErrors(filtRs_2run, multithread=3)
+errR_2run <- learnErrors(filtRs_2run, multithread=4)
     #143650100 total bases in 652955 reads from 4 samples will be used for learning the error rates.
-errR_3run <- learnErrors(filtRs_3run, multithread=3)
+errR_3run <- learnErrors(filtRs_3run, multithread=4)
     #102080220 total bases in 464001 reads from 25 samples will be used for learning the error rates.
-errR_4run <- learnErrors(filtRs_4run, multithread=3)
+errR_4run <- learnErrors(filtRs_4run, multithread=4)
     #115617480 total bases in 525534 reads from 13 samples will be used for learning the error rates.
-errR_5run <- learnErrors(filtRs_5run, multithread=3)
-    #105292660 total bases in 478603 reads from 15 samples will be used for learning the error rates.
-errR_6run <- learnErrors(filtRs_6run, multithread=3)
+errR_5run <- learnErrors(filtRs_5run, multithread=4)
+    #104002360 total bases in 472738 reads from 13 samples will be used for learning the error rates.
+errR_6run <- learnErrors(filtRs_6run, multithread=4)
     #133697740 total bases in 607717 reads from 4 samples will be used for learning the error rates.
 
 plotErrors(errR_1run, nominalQ=TRUE)
@@ -442,33 +442,66 @@ plotErrors(errR_4run, nominalQ=TRUE)
 ```
 
 
+save(errF_1run, file="~/STJ_SCTLD_TS_dada2/errF_1run.RData")
+save(errR_1run, file="~/STJ_SCTLD_TS_dada2/errR_1run.RData")
+
+save(errF_2run, file="~/STJ_SCTLD_TS_dada2/errF_2run.RData")
+save(errR_2run, file="~/STJ_SCTLD_TS_dada2/errR_2run.RData")
+
+save(errF_3run, file="~/STJ_SCTLD_TS_dada2/errF_3run.RData")
+save(errR_3run, file="~/STJ_SCTLD_TS_dada2/errR_3run.RData")
+
+save(errF_4run, file="~/STJ_SCTLD_TS_dada2/errF_4run.RData")
+save(errR_4run, file="~/STJ_SCTLD_TS_dada2/errR_4run.RData")
+
+save(errF_5run, file="~/STJ_SCTLD_TS_dada2/errF_5run.RData")
+save(errR_5run, file="~/STJ_SCTLD_TS_dada2/errR_5run.RData")
+
+save(errF_6run, file="~/STJ_SCTLD_TS_dada2/errF_6run.RData")
+save(errR_6run, file="~/STJ_SCTLD_TS_dada2/errR_6run.RData")
+
+
+ load("~/STJ_SCTLD_TS_dada2/errF_1run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errR_1run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errF_2run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errR_2run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errF_3run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errR_3run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errF_4run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errR_4run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errF_5run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errR_5run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errF_6run.RData")
+ load("~/STJ_SCTLD_TS_dada2/errR_6run.RData")
+ 
+ 
 ###########################################################################################################
 Sample Inference
 - We are now ready to apply the core sample inference algorithm to the filtered and trimmed sequence data.
 - see: https://www.nature.com/articles/nmeth.3869#methods
 ```{r}
-dadaFs_1run <- dada(filtFs_1run, err=errF_1run, multithread=3)
-dadaRs_1run <- dada(filtRs_1run, err=errR_1run, multithread=3)
+dadaFs_1run <- dada(filtFs_1run, err=errF_1run, multithread=4)
+dadaRs_1run <- dada(filtRs_1run, err=errR_1run, multithread=4)
 dadaFs_1run[[12]]
 
-dadaFs_2run <- dada(filtFs_2run, err=errF_2run, multithread=3)
-dadaRs_2run <- dada(filtRs_2run, err=errR_2run, multithread=3)
+dadaFs_2run <- dada(filtFs_2run, err=errF_2run, multithread=4)
+dadaRs_2run <- dada(filtRs_2run, err=errR_2run, multithread=4)
 dadaFs_2run[[12]]
 
-dadaFs_3run <- dada(filtFs_3run, err=errF_3run, multithread=3)
-dadaRs_3run <- dada(filtRs_3run, err=errR_3run, multithread=3)
+dadaFs_3run <- dada(filtFs_3run, err=errF_3run, multithread=4)
+dadaRs_3run <- dada(filtRs_3run, err=errR_3run, multithread=4)
 dadaFs_3run[[12]]
 
-dadaFs_4run <- dada(filtFs_4run, err=errF_4run, multithread=3)
-dadaRs_4run <- dada(filtRs_4run, err=errR_4run, multithread=3)
+dadaFs_4run <- dada(filtFs_4run, err=errF_4run, multithread=4)
+dadaRs_4run <- dada(filtRs_4run, err=errR_4run, multithread=4)
 dadaFs_4run[[12]]
 
-dadaFs_5run <- dada(filtFs_5run, err=errF_5run, multithread=3)
-dadaRs_5run <- dada(filtRs_5run, err=errR_5run, multithread=3)
+dadaFs_5run <- dada(filtFs_5run, err=errF_5run, multithread=4)
+dadaRs_5run <- dada(filtRs_5run, err=errR_5run, multithread=4)
 dadaFs_5run[[12]]
 
-dadaFs_6run <- dada(filtFs_6run, err=errF_6run, multithread=3)
-dadaRs_6run <- dada(filtRs_6run, err=errR_6run, multithread=3)
+dadaFs_6run <- dada(filtFs_6run, err=errF_6run, multithread=4)
+dadaRs_6run <- dada(filtRs_6run, err=errR_6run, multithread=4)
 dadaFs_6run[[12]]
 
 ```
@@ -532,7 +565,7 @@ dim(seqtab_4run)
 
 seqtab_5run <- makeSequenceTable(mergers_5run)
 dim(seqtab_5run)
-# 26 2426
+# 27 2425
 
 seqtab_6run <- makeSequenceTable(mergers_6run)
 dim(seqtab_6run)
@@ -577,11 +610,11 @@ seqtab_all <- mergeSequenceTables(seqtab2_1run, seqtab2_2run, seqtab2_3run, seqt
 ```{r}
 
 seqtab_all.nochim <- removeBimeraDenovo(seqtab_all, method="consensus", multithread=2, verbose=TRUE)
-#  Identified 472 bimeras out of 24356 input sequences.
+#  Identified 472 bimeras out of 24373 input sequences.
 dim(seqtab_all.nochim)
-#  218 23884
+#  219 23901
 sum(seqtab_all.nochim)/sum(seqtab_all)
-#  0.9944036
+#  0.9944393
 
 
 seqtab_final <- seqtab_all.nochim
@@ -695,14 +728,13 @@ the files needed can be found here: /proj/omics/bioinfo/databases/dada2
 I had to make a symbolic link, because of weird things with vortex1 vs. proj
 ln -s ../../../omics/bioinfo/databases/dada2/
 ```{r}
-taxa <- assignTaxonomy(seqtab_final, "/Users/cmiller/Downloads/temp_jeanne/silva_nr99_v138.1_train_set.fa.gz", multithread=TRUE)
+taxa <- assignTaxonomy(seqtab_final, "~/STJ_SCTLD_TS_dada2/dada2/silva_nr99_v138.1_train_set.fa.gz", multithread=4)
     #this was >10 min on Carolyn's computer!!!! 
-taxa <- addSpecies(taxa, "/Users/cmiller/Downloads/temp_jeanne/silva_species_assignment_v138.1.fa.gz")
+taxa <- addSpecies(taxa, "~/STJ_SCTLD_TS_dada2/dada2/silva_species_assignment_v138.1.fa.gz")
     #this was >10 min on Carolyn's computer!!!! 
 
-#save(taxa, file="/Users/cmiller/Downloads/temp_jeanne/taxaAssignTax.RData")
+save(taxa, file="~/STJ_SCTLD_TS_dada2/taxaAssignTax.RData")
 #load("~/STJ_SCTLD_TS_dada2/taxaAssignTax.RData")
-
 
 #Let’s inspect the taxonomic assignments:
 taxa.print <- taxa 
