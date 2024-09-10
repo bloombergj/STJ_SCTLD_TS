@@ -946,7 +946,7 @@ taxa_top20 <- as.data.frame(taxa[top_20_asvs,])
 taxa_top20$ASV_ID <- row.names(taxa_top20)
 taxa_top20 <- taxa_top20 %>% arrange(ASV_ID)
 
-write.csv(taxa_top20, "Top20_ASV_FishBay_Corals")
+write.csv(taxa_top20, "Top20_ASV_FishBay_Corals.csv")
  
 
 
@@ -1113,7 +1113,7 @@ taxa_top20 <- as.data.frame(taxa[top_20_asvs,])
 taxa_top20$ASV_ID <- row.names(taxa_top20)
 taxa_top20 <- taxa_top20 %>% arrange(ASV_ID)
 
-write.csv(taxa_top20, "Top20_ASV_CoralBay_Coral")
+write.csv(taxa_top20, "Top20_ASV_CoralBay_Coral.csv")
  
 
 
@@ -1208,7 +1208,7 @@ taxa_top20 <- as.data.frame(taxa[top_20_asvs,])
 taxa_top20$ASV_ID <- row.names(taxa_top20)
 taxa_top20 <- taxa_top20 %>% arrange(ASV_ID)
 
-write.csv(taxa_top20, "Top20_ASV_CoralBay_SW")
+write.csv(taxa_top20, "Top20_ASV_CoralBay_SW.csv")
  
 
 
