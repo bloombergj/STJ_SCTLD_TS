@@ -43,6 +43,9 @@ library(microbiome)
 #devtools::install_github('microsud/microbiomeutilities')
 library(microbiomeutilities)
 
+
+library(randomcoloR)
+
 ```
 
 #Upload data
@@ -204,7 +207,13 @@ ps.decontam.nozero <- filter_taxa(ps.decontam.nomitochloro, function(x) sum(x) >
  sum(Reads_per_sample$`sample_sums(ps.decontam.filt)`) #11640690
  
 write.csv(Reads_per_sample, file = "Reads_per_sample.csv")
+
+MetaData_SamplesWeUse <- data.frame(sample_data(ps.decontam.filt))
+write.csv(MetaData_SamplesWeUse, file = "MetaData_SamplesWeUse.csv")
 ```
+
+
+
 
 I should talk to Amy about post-processing cut off for sample reads, because there are 14 more samples that have >10,000 reads.... ugh (see Reads_per_sample)
 
@@ -400,8 +409,6 @@ ps.seawater.Fishbay <- ps.decontam.filt %>%
 ```{r}
 SW.FishBay.ord <- ordinate(ps.seawater.Fishbay, "PCoA", "bray",  trymax = 200, weakties = FALSE, set.seed(18))
 
-
-
 plot2C <- plot_ordination(ps.seawater.Fishbay, SW.FishBay.ord , type="samples", color="Healthy_Diseased_Recovered") +
   geom_point(size = 4, aes(color = factor(Healthy_Diseased_Recovered))) +
   theme(text=element_text(size=17),  
@@ -463,19 +470,19 @@ perm.SW.FB.date
 
 
 ```
-save as: Seawater_FishBay_Health
 
-SW_FishBay_OTU <- as.data.frame(otu_table(ps.seawater.Fishbay))
-check_FB_SW <- as.data.frame(rownames(SW_FishBay_OTU))
-check_FB_SW$ASVsum <- rowSums(SW_FishBay_OTU)
-hist(check_FB_SW$ASVsum)
-distance_matrix <- SW.FishBay.ord$points
- # SW-32: 228.40978, 0.68652091, -0.570158161
- # SW-41: 227.75985, -0.68577640, 0.573617623
- 
+There are a few points in my PCoA with much higher dispersion, which is making all the other points collapse into a line. I want to make sure there is nothing wrong with my ordination by examining those points. My hunch is that the diseased water samples are just so much more different than the healthy water samples. 
+```{r}
+# Extract the PCoA coordinates
+pcoa_coords <- SW.FishBay.ord$vectors
+# Convert the PCoA coordinates to a data frame
+pcoa_coords_df <- as.data.frame(pcoa_coords)
+```
+Ok this gives me the coordinates of each of my points. The outlier points are: 
+  SW-34duplicate, SW-32, SW-29, SW-41, SW-31.
+When I cross-reference these points to the stacked bar plots, I see that these same samples are the extrememly different ASV make-up samples. So I believe this is real variation and not a math issue. The healthy samples are just so much more similar to one another than the diseased samples. 
 
-Sums <- as.data.frame(rowSums(otus))
- 
+
 
 #phyloseq obejct with Seawater from only Coral Bay
 ```{r}
@@ -688,6 +695,7 @@ plot_grid(plot1A + theme(legend.position = "none"),
 
 
 
+
 #put plots together for Fig 2
 ```{r}
 
@@ -702,6 +710,30 @@ plot_grid(plot2A + theme(legend.position = "none"),
 ```
 
 
+#SCTLD Prevalence
+```{r}
+
+Prevelance_ForAnalyses <- read.csv("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Disease Wheel Data/Prevelance_ForAnalyses.csv")
+Prevelance_ForAnalyses$Date_nice <- as.Date(Prevelance_ForAnalyses$Date) #make ggplot know it's a date
+
+
+ggplot()+
+  geom_point(data=Prevelance_ForAnalyses, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, color="Red") +
+  geom_smooth(data=Prevelance_ForAnalyses, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, method = loess, color="Red", se = FALSE) +
+  scale_y_continuous(name = "SCTLD Prevelance (percent)") +
+  xlab("Date") +
+  theme(text=element_text(size=13))+
+  ggtitle("SCTLD Prevelance in Fish Bay Seawater") 
+
+
+#For Loess:
+#default span is α = 0.75
+
+
+```
+
+
+
 
 
 #Beta Diversity 
@@ -709,6 +741,8 @@ plot_grid(plot2A + theme(legend.position = "none"),
 
 #MODIFIED FROM CYNTHIA: Code to Reproduce R Figures
 my code is sloppy, oops
+
+I want to double check the date vs date_nice effect -- 9/13/24
 
 #DispXPrev - Fish Bay Seawater
 ```{r}
@@ -730,31 +764,31 @@ dis2 <- as.data.frame(mod2$distances) #save the distances
 dis2.meta <- cbind(dis2, metadat_rel) #combine distances with the metadata
 colnames(dis2.meta)[1] <- "distance"
 
-dis2.meta$Date_nice <- as.Date(dis2.meta$Date)
+dis2.meta$Date_nice <- as.Date(dis2.meta$Date) #make ggplot know it's a date
 
 #run linear model and Kruskal-Wallis test to test significance
 distlm2 <-lm(distance~Date, data=dis2.meta)
 anova(distlm2)
-      #Response: distance
-      #          Df   Sum Sq   Mean Sq F value    Pr(>F)    
-      #Date       6 0.39411 0.065685  1.0591 0.4136
-      #Residuals 24 1.48853 0.062022 
+      # Response: distance
+      #           Df  Sum Sq  Mean Sq F value Pr(>F)
+      # Date      10 0.50303 0.050303   1.222 0.3114
+      # Residuals 35 1.44073 0.041164  
 
 summary(distlm2)
-        # Residual standard error: 0.249 on 24 degrees of freedom
-        #  Multiple R-squared:  0.2093,	Adjusted R-squared:  0.01167 
-        #  F-statistic: 1.059 on 6 and 24 DF,  p-value: 0.4136
+      # Residual standard error: 0.2029 on 35 degrees of freedom
+      # Multiple R-squared:  0.2588,	Adjusted R-squared:  0.04702 
+      # F-statistic: 1.222 on 10 and 35 DF,  p-value: 0.3114
 
 
+Prevelance_ForAnalyses <- read.csv("~/Documents/WHOI/Projects/STJ_SCTLD_TimeseriesExperiment/Disease Wheel Data/Prevelance_ForAnalyses.csv")
+Prevelance_ForAnalyses$Date_nice <- as.Date(Prevelance_ForAnalyses$Date) #make ggplot know it's a date
 
 
-dis2.meta$Prev_Percent <- as.numeric(dis2.meta$Prev_Percent)
-
-plot <- ggplot(dis2.meta)+
-  geom_point(aes(x = Date_nice, y=distance), color="Blue") +
-  geom_smooth(aes(x = Date_nice, y=distance), method = "lm", color="Blue", se = FALSE) +
-  geom_point(data=subset(dis2.meta, !is.na(Prev_Percent)), aes(x = Date_nice, y=Prev_Percent/5), na.rm = TRUE, color="Red") +
-  geom_smooth(data=subset(dis2.meta, !is.na(Prev_Percent)), aes(x = Date_nice, y=Prev_Percent/5), na.rm = TRUE, method = "lm", color="Red", se = FALSE) +
+plot <- ggplot()+
+  geom_point(data = dis2.meta, aes(x = Date_nice, y=distance), color="Blue") +
+  geom_smooth(data = dis2.meta, aes(x = Date_nice, y=distance), method = "lm", color="Blue", se = FALSE) +
+  geom_point(data=Prevelance_ForAnalyses, aes(x = Date_nice, y=Prev_Percent/5), na.rm = TRUE, color="Red") +
+  geom_smooth(data=Prevelance_ForAnalyses, aes(x = Date_nice, y=Prev_Percent/5), na.rm = TRUE, method = "lm", color="Red", se = FALSE) +
   scale_y_continuous(name = "Distance to Centroid",
     sec.axis = sec_axis(~.*5, name="SCTLD Prevelance (percent)")) +
   xlab("Date") +
@@ -764,6 +798,16 @@ plot <- ggplot(dis2.meta)+
     axis.title.y.right = element_text(color = "Red", size=13))
 
 plot
+
+rm(metadat_rel)
+rm(otu_rel)
+rm(otu_rel2)
+rm(ASV.coral.log)
+rm(ASV.coral.log.b)
+rm(mod2)
+rm(dis2)
+rm(dis2.meta)
+rm(distlm2)
 ```
 
 #DispXPrev - add Fish Bay Coral
@@ -791,23 +835,32 @@ dis2.meta$Date_nice <- as.Date(dis2.meta$Date)
 #run linear model and Kruskal-Wallis test to test significance
 distlm2 <-lm(distance~Date, data=dis2.meta)
 anova(distlm2)
-      #Response: distance
-      #          Df   Sum Sq   Mean Sq F value    Pr(>F)    
-      #Date       6 0.073331 0.0122219   9.587 5.056e-05 ***
-      #Residuals 20 0.025497 0.0012748      
+      # Response: distance
+      #           Df   Sum Sq   Mean Sq F value  Pr(>F)  
+      # Date      10 0.065343 0.0065343  6.5882 2.617e-05 ***
+      # Residuals 30 0.029755 0.0009918                   
+     
 summary(distlm2)
-      # Residual standard error: 0.0357 on 20 degrees of freedom
-      # Multiple R-squared:  0.742,	Adjusted R-squared:  0.6646 
-      # F-statistic: 9.587 on 6 and 20 DF,  p-value: 5.056e-05
+      # Residual standard error: 0.04635 on 39 degrees of freedom
+      # Multiple R-squared:  0.6871,	Adjusted R-squared:  0.5828 
+      # F-statistic: 6.588 on 10 and 30 DF,  p-value: 2.617e-05
 
-Prev_data_noNA<- na.omit(dis2.meta)
-
-dis2.meta$Prev_Percent <- as.numeric(dis2.meta$Prev_Percent)
 
 plot + 
   geom_point(data = dis2.meta, aes(x = Date_nice, y=distance), color="purple") +
   geom_smooth(data = dis2.meta, aes(x = Date_nice, y=distance), method = "lm", color="purple", se = FALSE) 
 
+
+
+rm(metadat_rel)
+rm(otu_rel)
+rm(otu_rel2)
+rm(ASV.coral.log)
+rm(ASV.coral.log.b)
+rm(mod2)
+rm(dis2)
+rm(dis2.meta)
+rm(distlm2)
 ```
 
 
@@ -842,12 +895,13 @@ distlm2 <-lm(distance~Date, data=dis2.meta)
 anova(distlm2)
       #Response: distance
       #          Df   Sum Sq   Mean Sq F value    Pr(>F)    
-      #Date      7 0.014760 0.0021086  1.2215 0.3253
-      #Residuals 27 0.046607 0.0017262
+      # Date_nice  1 0.000179 0.00017927   0.068 0.7955
+      # Residuals 43 0.113374 0.00263660 
 summary(distlm2)
-    #    Residual standard error: 0.04155 on 27 degrees of freedom
-    #    Multiple R-squared:  0.2405,	Adjusted R-squared:  0.04362 
-    #    F-statistic: 1.222 on 7 and 27 DF,  p-value: 0.3253
+      # Residual standard error: 0.05135 on 43 degrees of freedom
+      # Multiple R-squared:  0.001579,	Adjusted R-squared:  -0.02164 
+      # F-statistic: 0.06799 on 1 and 43 DF,  p-value: 0.7955
+
 
 
 dis2.meta$Prev_Percent <- as.numeric(dis2.meta$Prev_Percent)
@@ -866,6 +920,16 @@ plot <- ggplot(dis2.meta)+
     axis.title.y.right = element_text(color = "Red", size=13))
 
 plot
+
+rm(metadat_rel)
+rm(otu_rel)
+rm(otu_rel2)
+rm(ASV.coral.log)
+rm(ASV.coral.log.b)
+rm(mod2)
+rm(dis2)
+rm(dis2.meta)
+rm(distlm2)
 ```
 
 #DispXPrev - add Coral Bay Coral
@@ -911,12 +975,68 @@ plot +
   geom_point(data = dis2.meta, aes(x = Date_nice, y=distance), color="purple") +
   geom_smooth(data = dis2.meta, aes(x = Date_nice, y=distance), method = "lm", color="purple", se = FALSE) 
 
+rm(metadat_rel)
+rm(otu_rel)
+rm(otu_rel2)
+rm(ASV.coral.log)
+rm(ASV.coral.log.b)
+rm(mod2)
+rm(dis2)
+rm(dis2.meta)
+rm(distlm2)
+
 ```
 
 
 
 
 #Stacked Bar plots
+
+##rel abun >= 1% for Corals from Fish Bay
+- code is almost entirely from Chapt GPT
+- at first, I tried plotting the ASVs that make up 90% cumulative relative abundance for each sample. But that gave me a total of 1175 unique ASVs, which is more than the number of colors in R, and would not be useful for plotitng.
+```{r}
+abundance_table <- as.data.frame(otu_table(ps.seawater.Fishbay))
+  #41 obs of 3873 variables
+abundance_table <- abundance_table[, colSums(abundance_table != 0) > 0]
+
+# Transpose the abundance table if necessary to have ASVs in rows and samples in columns
+abundance_table <- t(abundance_table)
+
+# Add a column for ASV IDs
+abundance_table <- as.data.frame(abundance_table) #redundant, but keeps R happy
+abundance_table$ASV <- rownames(abundance_table)
+
+# Melt the abundance table to long format for ggplot2
+abundance_long <- abundance_table %>%
+  pivot_longer(-ASV, names_to = "Sample", values_to = "Abundance") %>%
+  arrange(Sample, desc(Abundance))
+
+# Filter ASVs with relative abundance >= 0.01 (1%)
+abundance_long <- abundance_long %>%
+  filter(Abundance >= 0.01)
+
+#how many ASVs are left to plot?
+length(unique(abundance_long$ASV)) #132 --- ok much more reasonable 
+n <- 132 #plug that number in here to a get that number of unique colors to plot
+palette <- distinctColorPalette(n)
+  
+# Create the stacked bar plot
+ggplot(abundance_long, aes(x = Sample, y = Abundance, fill = ASV)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  scale_fill_manual(values=palette) +
+  labs(x = "Sample", y = "Relative Abundance", fill = "ASV") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = "none")
+```
+
+
+
+
+
+
+
 
 ##20 most abundant AVS -- Corals from Fish Bay
 ```{r}
