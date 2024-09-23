@@ -14,36 +14,14 @@ setwd("~/Documents/WHOI/Projects/STJ_SCTLD_TS")
 # For data wrangling
 library(dplyr); packageVersion("dplyr")
 library(tidyr); packageVersion("tidyr")
-library(knitr); packageVersion("knitr")
 
 # For microbiome/metagenome analysis
-library(corncob); packageVersion("corncob")
+library(corncob)
 library(vegan); packageVersion("vegan")
 library(phyloseq); packageVersion("phyloseq")
-#install.packages("remotes")
-#remotes::install_github("mikemc/speedyseq")
-library(speedyseq); packageVersion("speedyseq")
 
 # For visualization
 library(ggplot2); packageVersion("ggplot2")
-theme_set(theme_bw())
-
-library(stringr)
-library(ggforce)
-
-
-library(ggpubr)
-library(cowplot)
-
-
-library(eulerr)
-library(BiocManager)
-#BiocManager::install("microbiome")
-library(microbiome)
-#devtools::install_github('microsud/microbiomeutilities')
-library(microbiomeutilities)
-
-
 library(randomcoloR)
 
 ```
@@ -57,7 +35,7 @@ taxa <- as.matrix(read.table("taxonomy_SCTSCTLDTD_J1N2V2_final.txt", sep = "\t",
 ASV_ID <-read.table("ASVsequences_SCTSCTLDTD_J1N2V2_final.txt", sep = "\t", row.names = 1, header = TRUE)
 
 metadata <- read.csv("meta_table.csv", header = TRUE)
-metadata <- metadata[,1:24]
+metadata <- metadata[,1:25]
 row.names(metadata) <- metadata$Sample_names
 
 ```
@@ -388,11 +366,7 @@ plot3 <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", s
 
 
 ```
-saved as: FishBay_Coral_Timpoint&Health
-          FishBay_Coral_Fate&Health
-          FishBay_Coral_FateWellipse
-          FishBay_Coral_Healthpoint
-          FishBay_Coral_Healthpoint_faceted
+
 
 
 #phyloseq obejct with Seawater from only Fish Bay
@@ -992,48 +966,211 @@ rm(distlm2)
 
 #Stacked Bar plots
 
-##rel abun >= 1% for Corals from Fish Bay
+##rel abun >= 1% for Seawater from Fish Bay
 - code is almost entirely from Chapt GPT
 - at first, I tried plotting the ASVs that make up 90% cumulative relative abundance for each sample. But that gave me a total of 1175 unique ASVs, which is more than the number of colors in R, and would not be useful for plotitng.
 ```{r}
 abundance_table <- as.data.frame(otu_table(ps.seawater.Fishbay))
-  #41 obs of 3873 variables
+  #46 obs of 7023 variables
 abundance_table <- abundance_table[, colSums(abundance_table != 0) > 0]
+  #46 obs of 7023 variables
 
-# Transpose the abundance table if necessary to have ASVs in rows and samples in columns
-abundance_table <- t(abundance_table)
-
-# Add a column for ASV IDs
-abundance_table <- as.data.frame(abundance_table) #redundant, but keeps R happy
-abundance_table$ASV <- rownames(abundance_table)
+meta_SW.FishBay <- as.data.frame(sample_data(ps.seawater.Fishbay))
+data_frame_merge <- merge(abundance_table, meta_SW.FishBay,
+                          by = 'row.names', all = TRUE)
 
 # Melt the abundance table to long format for ggplot2
-abundance_long <- abundance_table %>%
-  pivot_longer(-ASV, names_to = "Sample", values_to = "Abundance") %>%
-  arrange(Sample, desc(Abundance))
+abundance_long <- data_frame_merge %>%
+  pivot_longer(cols=starts_with("ASV"), 
+               names_to = "ASV_ID", 
+               values_to = "Abundance") %>%
+  arrange(Row.names, desc(Abundance))
+dim(abundance_long) #323058     27
 
 # Filter ASVs with relative abundance >= 0.01 (1%)
 abundance_long <- abundance_long %>%
   filter(Abundance >= 0.01)
+dim(abundance_long) #858  27 --> lovely!
 
 #how many ASVs are left to plot?
-length(unique(abundance_long$ASV)) #132 --- ok much more reasonable 
-n <- 132 #plug that number in here to a get that number of unique colors to plot
+length(unique(abundance_long$ASV_ID)) #114
+n <- 114 #plug that number in here to a get that number of unique colors to plot
 palette <- distinctColorPalette(n)
   
 # Create the stacked bar plot
-ggplot(abundance_long, aes(x = Sample, y = Abundance, fill = ASV)) +
-  geom_bar(stat = "identity") +
-  theme_minimal() +
+ggplot(abundance_long, aes(x = Date, y = Abundance, fill = ASV_ID)) +
+  geom_bar(stat = "identity", position="stack") +
+  facet_grid(~Tag, scale="free") +
+ # theme_minimal() +
   scale_fill_manual(values=palette) +
-  labs(x = "Sample", y = "Relative Abundance", fill = "ASV") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),
-        legend.position = "none")
+  labs(y = "Relative Abundance", fill = "ASV") +
+  theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = "none") +
+  labs(title = "ASVs with at least 1% relative abundance from Seawater from Fish Bay") +
+  xlab(" ")
+
+
+rm(abundance_table)
+rm(meta_SW.FishBay)
+rm(data_frame_merge)
+rm(abundance_long)
+rm(n)
+rm(palette)
+```
+
+
+##rel abun >= 1% for Corals from Fish Bay
+```{r}
+abundance_table <- as.data.frame(otu_table(ps.coral.Fishbay))
+  #41 obs of 3871 variables
+abundance_table <- abundance_table[, colSums(abundance_table != 0) > 0]
+  #41 obs of 3871 variables
+
+meta_Coral.FishBay <- as.data.frame(sample_data(ps.coral.Fishbay))
+data_frame_merge <- merge(abundance_table, meta_Coral.FishBay,
+                          by = 'row.names', all = TRUE)
+
+# Melt the abundance table to long format for ggplot2
+abundance_long <- data_frame_merge %>%
+  pivot_longer(cols=starts_with("ASV"), 
+               names_to = "ASV_ID", 
+               values_to = "Abundance") %>%
+  arrange(Row.names, desc(Abundance))
+dim(abundance_long) #158711     27
+
+# Filter ASVs with relative abundance >= 0.01 (1%)
+abundance_long <- abundance_long %>%
+  filter(Abundance >= 0.01)
+dim(abundance_long) #687  27 --> lovely!
+
+#how many ASVs are left to plot?
+length(unique(abundance_long$ASV_ID)) #544
+n <- 544 #plug that number in here to a get that number of unique colors to plot
+palette <- distinctColorPalette(n)
+  
+# Create the stacked bar plot
+ggplot(abundance_long, aes(x = Date, y = Abundance, fill = ASV_ID)) +
+  geom_bar(stat = "identity", position="stack") +
+  facet_grid(~Tag, scale="free") +
+ # theme_minimal() +
+  scale_fill_manual(values=palette) +
+  labs(y = "Relative Abundance", fill = "ASV") +
+  theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = "none") +
+  labs(title = "ASVs with at least 1% relative abundance from Coral from Fish Bay") +
+  xlab(" ")
+
+
+rm(abundance_table)
+rm(meta_Coral.FishBay)
+rm(data_frame_merge)
+rm(abundance_long)
+rm(n)
+rm(palette)
+```
+
+
+##rel abun >= 1% for Corals from Coral Bay
+```{r}
+abundance_table <- as.data.frame(otu_table(ps.Coral.Coralbay))
+  #35 obs of 5140 variables
+abundance_table <- abundance_table[, colSums(abundance_table != 0) > 0]
+  #35 obs of 5140 variables
+
+meta_Coral.CoralBay <- as.data.frame(sample_data(ps.Coral.Coralbay))
+data_frame_merge <- merge(abundance_table, meta_Coral.CoralBay,
+                          by = 'row.names', all = TRUE)
+
+# Melt the abundance table to long format for ggplot2
+abundance_long <- data_frame_merge %>%
+  pivot_longer(cols=starts_with("ASV"), 
+               names_to = "ASV_ID", 
+               values_to = "Abundance") %>%
+  arrange(Row.names, desc(Abundance))
+dim(abundance_long) #179900     27
+
+# Filter ASVs with relative abundance >= 0.01 (1%)
+abundance_long <- abundance_long %>%
+  filter(Abundance >= 0.01)
+dim(abundance_long) #525  27 --> lovely!
+
+#how many ASVs are left to plot?
+length(unique(abundance_long$ASV_ID)) #459
+n <- 459 #plug that number in here to a get that number of unique colors to plot
+palette <- distinctColorPalette(n)
+  
+# Create the stacked bar plot
+ggplot(abundance_long, aes(x = Date, y = Abundance, fill = ASV_ID)) +
+  geom_bar(stat = "identity", position="stack") +
+  facet_grid(~Tag, scale="free") +
+ # theme_minimal() +
+  scale_fill_manual(values=palette) +
+  labs(y = "Relative Abundance", fill = "ASV") +
+  theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = "none") +
+  labs(title = "ASVs with at least 1% relative abundance from Coral from Coral Bay") +
+  xlab(" ")
+
+
+rm(abundance_table)
+rm(meta_Coral.CoralBay)
+rm(data_frame_merge)
+rm(abundance_long)
+rm(n)
+rm(palette)
 ```
 
 
 
+##rel abun >= 1% for Seawater from Coral Bay
+```{r}
+abundance_table <- as.data.frame(otu_table(ps.Seawater.Coralbay))
+  #45 obs of 9158 variables
+abundance_table <- abundance_table[, colSums(abundance_table != 0) > 0]
+  #45 obs of 9158 
 
+meta_Seawater.CoralBay <- as.data.frame(sample_data(ps.Seawater.Coralbay))
+data_frame_merge <- merge(abundance_table, meta_Seawater.CoralBay,
+                          by = 'row.names', all = TRUE)
+
+# Melt the abundance table to long format for ggplot2
+abundance_long <- data_frame_merge %>%
+  pivot_longer(cols=starts_with("ASV"), 
+               names_to = "ASV_ID", 
+               values_to = "Abundance") %>%
+  arrange(Row.names, desc(Abundance))
+dim(abundance_long) #412110     27
+
+# Filter ASVs with relative abundance >= 0.01 (1%)
+abundance_long <- abundance_long %>%
+  filter(Abundance >= 0.01)
+dim(abundance_long) #859  27 --> lovely!
+
+#how many ASVs are left to plot?
+length(unique(abundance_long$ASV_ID)) #73
+n <- 73 #plug that number in here to a get that number of unique colors to plot
+palette <- distinctColorPalette(n)
+  
+# Create the stacked bar plot
+ggplot(abundance_long, aes(x = Date, y = Abundance, fill = ASV_ID)) +
+  geom_bar(stat = "identity", position="stack") +
+  facet_grid(~Tag, scale="free") +
+ # theme_minimal() +
+  scale_fill_manual(values=palette) +
+  labs(y = "Relative Abundance", fill = "ASV") +
+  theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position = "none") +
+  labs(title = "ASVs with at least 1% relative abundance from Seawater from Coral Bay") +
+  xlab(" ")
+
+
+rm(abundance_table)
+rm(meta_Seawater.CoralBay)
+rm(data_frame_merge)
+rm(abundance_long)
+rm(n)
+rm(palette)
+```
 
 
 
@@ -1391,147 +1528,151 @@ Top20ASVsfromSWfromCoralBay
 
 
 #Bubble plots
-#Fish Bay_ SW
+##Seawater from Fish Bay
 ```{r}
 asv_abundance <- as.data.frame(as.matrix(otu_table(ps.seawater.Fishbay)))
- #29 obs of 16848 variables
+ #46 obs of 7023 variables
 meta_forBubble <- sample_data(ps.seawater.Fishbay)
 
-ASVofInterst <- c("ASV29", "ASV3", "ASV48", "ASV54", "ASV9" )
+ASVofInterst <- c("ASV1", "ASV45", "ASV67", "ASV79")
 asv_abun_ofInterest <- asv_abundance[, ASVofInterst]
 asv_abun_ofInterest$Sample_names <- row.names(asv_abun_ofInterest)
 
 combo_data <- cbind(asv_abun_ofInterest, meta_forBubble)
 
-colNeeded <- c("ASV29", "ASV3", "ASV48", "ASV54", "ASV9", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered")
+colNeeded <- c("ASV1", "ASV45", "ASV67", "ASV79", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered")
 combo_data <- combo_data[,colNeeded]
 
-#48
+
+#ASV 1
 ggplot(combo_data,
        aes(x = Date, 
            y = Tag,
-           size = ASV48, 
+           size = ASV1, 
           color = Healthy_Diseased_Recovered)) +
   geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 48 Relative Abundance") +
+  labs(x = "Date", y = "Colony Tag", title = "ASV 1 Relative Abundance") +
    theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 
-#54
+#ASV 45
 ggplot(combo_data,
        aes(x = Date, 
            y = Tag,
-           size = ASV54, 
+           size = ASV45, 
           color = Healthy_Diseased_Recovered)) +
   geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 54 Relative Abundance") +
+  labs(x = "Date", y = "Colony Tag", title = "ASV 45 Relative Abundance") +
    theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 
-#9
+#ASV 67
 ggplot(combo_data,
        aes(x = Date, 
            y = Tag,
-           size = ASV9, 
+           size = ASV67, 
           color = Healthy_Diseased_Recovered)) +
   geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 9 Relative Abundance") +
+  labs(x = "Date", y = "Colony Tag", title = "ASV 67 Relative Abundance") +
    theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 
-#3
+#ASV 79
 ggplot(combo_data,
        aes(x = Date, 
            y = Tag,
-           size = ASV3, 
+           size = ASV79, 
           color = Healthy_Diseased_Recovered)) +
   geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 3 Relative Abundance") +
+  labs(x = "Date", y = "Colony Tag", title = "ASV 79 Relative Abundance") +
    theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 
-#29
-ggplot(combo_data,
-       aes(x = Date, 
-           y = Tag,
-           size = ASV29, 
-          color = Healthy_Diseased_Recovered)) +
-  geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 29 Relative Abundance") +
-   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
-
-combo_data$Tag
 ```
 
 
 
-#Coral Bay_ SW
+##Seawater from Coral Bay
 ```{r}
 asv_abundance <- as.data.frame(as.matrix(otu_table(ps.Seawater.Coralbay)))
- #29 obs of 19558 variables
+ #45 obs of 9158 variables
 meta_forBubble <- sample_data(ps.Seawater.Coralbay)
 
-ASVofInterst <- c("ASV29", "ASV3", "ASV48", "ASV54", "ASV9" )
+ASVofInterst <- c("ASV1", "ASV45", "ASV67", "ASV79")
 asv_abun_ofInterest <- asv_abundance[, ASVofInterst]
 asv_abun_ofInterest$Sample_names <- row.names(asv_abun_ofInterest)
 
 combo_data <- cbind(asv_abun_ofInterest, meta_forBubble)
 
-colNeeded <- c("ASV29", "ASV3", "ASV48", "ASV54", "ASV9", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered", "Site_Disease")
+colNeeded <- c("ASV1", "ASV45", "ASV67", "ASV79", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered", "Site_Disease")
 combo_data <- combo_data[,colNeeded]
 
-#48
+#ASV 1
 ggplot(combo_data,
        aes(x = Date, 
            y = Tag,
-           size = ASV48, 
+           size = ASV1, 
           color = Site_Disease)) +
   geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 48 Relative Abundance") +
+  labs(x = "Date", y = "Colony Tag", title = "ASV 1 Relative Abundance") +
    theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 
-#54
-ggplot(combo_data,
-       aes(x = Date, 
-           y = Tag,
-           size = ASV54, 
-          color = Site_Disease)) +
-  geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 54 Relative Abundance") +
-   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
-
-#9
-ggplot(combo_data,
-       aes(x = Date, 
-           y = Tag,
-           size = ASV9, 
-          color = Site_Disease)) +
-  geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 9 Relative Abundance") +
-   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
-
-#3
-ggplot(combo_data,
-       aes(x = Date, 
-           y = Tag,
-           size = ASV3, 
-          color = Site_Disease)) +
-  geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 3 Relative Abundance") +
-   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
-
-#29
-ggplot(combo_data,
-       aes(x = Date, 
-           y = Tag,
-           size = ASV29, 
-          color = Site_Disease)) +
-  geom_point()+
-  labs(x = "Date", y = "Colony Tag", title = "ASV 29 Relative Abundance") +
-   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
-
-combo_data$Tag
 ```
 
 
 
+#Differentail abundance
+This is based on code from Mallory, which she modified from Cynthia's code.
+The goal is to conduct differential abundance analyses on the top 200 must abundant ASVs. 
+First, I will make a phyloseq object with only healthy and diseased samples, because differential abundance is only done on two factors at a time. Then I will pull out the taxa with the top 200 highest abundance. Then conduct differential abundance on that. 
 
+##Seawater from Fish Bay
+```{r}
+# Subset the phyloseq object to just data for healthy or diseased corals (no dead)
+ps.SW.Fishbay.HorD <- ps.seawater.Fishbay %>%
+  subset_samples(Healthy_or_Diseased != "Dead") %>% #remove dead samples
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+# Make a table of the ASVs in order or most abundance to least abundant. TotAbund shows the total abundance of each ASV across samples. 
+SW.Fishbay.HorD.tbl <-
+    phyloseq::otu_table(ps.SW.Fishbay.HorD) %>%
+    t(.) %>%  # . represents the product of the line above it
+    as.data.frame %>%
+    dplyr::slice(which(rowSums(.) > 0)) %>%
+    as.data.frame %>%
+    dplyr::mutate(TotAbund = rowSums(.)) %>%
+    dplyr::arrange(desc(TotAbund))
+
+#Get the top 200 most abundace ASVs and get rid of TotAbund
+Top200_ASVs <- SW.Fishbay.HorD.tbl[1:200, ] 
+Top200_ASVs <- Top200_ASVs  %>%
+                dplyr::select(-TotAbund)
+
+Top200_ASVs <- rownames(Top200_ASVs) # Pull out just the ASV names of top 200
+ps.SW.Fishbay_Top200ASVs <- phyloseq::prune_taxa(Top200_ASVs, ps.SW.Fishbay.HorD) #new phyloseq object with 200 top taxa across samples from healthy or diseased samples
+```
+
+
+```{r}
+# Using corncob and Cynthia's code on filtered top 200 taxa data
+
+# Make factors
+# ps.SW.Fishbay_Top200ASVs is the phyloseq object with the top 200 taxa across treatments 1 and 3
+sample_data(ps.SW.Fishbay_Top200ASVs)$Healthy_or_Diseased <-   factor(sample_data(ps.SW.Fishbay_Top200ASVs)$Healthy_or_Diseased,levels=c("Healthy", "Diseased"))
+
+# Make subsets of the treatments
+ps200_HorD <- subset_samples(ps.SW.Fishbay_Top200ASVs, Healthy_or_Diseased %in% c("Healthy", "Diseased"))
+
+set.seed(1)
+
+# Corncob: Differential abundance test comparing T48 samples of treatments 1 and 3 by treatment
+ps.SW.Fishbay_Top200ASVs <- differentialTest(formula = ~ Healthy_or_Diseased, 
+                             phi.formula = ~ Healthy_or_Diseased,
+                             formula_null = ~ 1,
+                             phi.formula_null = ~ Healthy_or_Diseased,
+                             test = "Wald", boot = FALSE,
+                             data = ps200_HorD,
+                             fdr_cutoff = 0.05)
+ps200_trt1_trt3_T48.da
+
+
+```
 
 
 
