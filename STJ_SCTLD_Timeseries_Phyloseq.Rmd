@@ -1622,9 +1622,9 @@ This is based on code from Mallory, which she modified from Cynthia's code.
 The goal is to conduct differential abundance analyses on the top 200 must abundant ASVs. 
 First, I will make a phyloseq object with only healthy and diseased samples, because differential abundance is only done on two factors at a time. Then I will pull out the taxa with the top 200 highest abundance. Then conduct differential abundance on that. 
 
-##Seawater from Fish Bay
+##Healthy or diseased: Seawater from Fish Bay 
 ```{r}
-# Subset the phyloseq object to just data for healthy or diseased corals (no dead)
+#Using a phyloseq object with relative, subset the phyloseq object to just data for healthy or diseased corals (no dead)
 ps.SW.Fishbay.HorD <- ps.seawater.Fishbay %>%
   subset_samples(Healthy_or_Diseased != "Dead") %>% #remove dead samples
   filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
@@ -1645,7 +1645,29 @@ Top200_ASVs <- Top200_ASVs  %>%
                 dplyr::select(-TotAbund)
 
 Top200_ASVs <- rownames(Top200_ASVs) # Pull out just the ASV names of top 200
-ps.SW.Fishbay_Top200ASVs <- phyloseq::prune_taxa(Top200_ASVs, ps.SW.Fishbay.HorD) #new phyloseq object with 200 top taxa across samples from healthy or diseased samples
+```
+
+
+```{r}
+#However, corncob wants count data, not relative abundance. So I am going to use "Top200_ASVs" to filter a new phyloseq object called "ps.Counts.Seawater.Fishbay" which has count data
+
+#Make a Seawater from Fish Bay phyloseq object with count data, not relative abundance
+ps.Counts.Seawater.Fishbay <- ps.decontam.filt %>%
+  subset_samples(Sample_Type == "Seawater") %>% #subset coral samples
+  subset_samples(Site == "Fish_Bay") %>%
+  subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>% 
+  subset_samples(Healthy_or_Diseased != "Dead") %>% #remove dead samples
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+#check out the meta data of this phyloseq object to double check that I have the samples I want in it
+meta_temp <- sample_data(ps.Counts.Seawater.Fishbay)
+rm(meta_temp)
+#Double check that this is count data
+otu_table(ps.Counts.Seawater.Fishbay)[1:3, 1:3]
+
+
+#Prune the phyloseq object, so it only has the ASVs in Top200_ASVs. This will give a new phyloseq object with 200 top taxa across samples from healthy or diseased samples
+ps.SW.Fishbay_Top200ASVs <- phyloseq::prune_taxa(Top200_ASVs, ps.Counts.Seawater.Fishbay) 
 ```
 
 
@@ -1669,12 +1691,91 @@ ps.SW.Fishbay_Top200ASVs <- differentialTest(formula = ~ Healthy_or_Diseased,
                              test = "Wald", boot = FALSE,
                              data = ps200_HorD,
                              fdr_cutoff = 0.05)
-ps200_trt1_trt3_T48.da
 
-
+ps.SW.Fishbay_Top200ASVs$significant_taxa
+length(ps.SW.Fishbay_Top200ASVs$significant_taxa) #10! that's a super reasonable number! Woohoo!
+# [1] "ASV45"  "ASV67"  "ASV79"  "ASV84"  "ASV158" "ASV189" "ASV203" "ASV246" "ASV307" "ASV354"
+plot(ps.SW.Fishbay_Top200ASVs)
 ```
 
 
 
+
+
+##Before or after: Seawater from Coral Bay 
+```{r}
+#Using a phyloseq object with relative (made in section above)
+ps.Seawater.Coralbay
+
+# Make a table of the ASVs in order or most abundance to least abundant. TotAbund shows the total abundance of each ASV across samples. 
+SW.CoralBay.tbl <-
+    phyloseq::otu_table(ps.Seawater.Coralbay) %>%
+    t(.) %>%  # . represents the product of the line above it
+    as.data.frame %>%
+    dplyr::slice(which(rowSums(.) > 0)) %>%
+    as.data.frame %>%
+    dplyr::mutate(TotAbund = rowSums(.)) %>%
+    dplyr::arrange(desc(TotAbund))
+
+#Get the top 200 most abundace ASVs and get rid of TotAbund
+Top200_ASVs <- SW.CoralBay.tbl[1:200, ] 
+Top200_ASVs <- Top200_ASVs  %>%
+                dplyr::select(-TotAbund)
+
+Top200_ASVs <- rownames(Top200_ASVs) # Pull out just the ASV names of top 200
+```
+
+
+```{r}
+#However, corncob wants count data, not relative abundance. So I am going to use "Top200_ASVs" to filter a new phyloseq object called "ps.Counts.Seawater.Fishbay" which has count data
+
+#Make a Seawater from Fish Bay phyloseq object with count data, not relative abundance
+ps.Counts.Seawater.CoralBay <- ps.decontam.filt %>%
+  subset_samples(Sample_Type == "Seawater") %>% #subset coral samples
+  subset_samples(Site == "Coral_Bay") %>%
+  subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>%
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+#check out the meta data of this phyloseq object to double check that I have the samples I want in it
+meta_temp <- sample_data(ps.Counts.Seawater.CoralBay)
+rm(meta_temp)
+#Double check that this is count data
+otu_table(ps.Counts.Seawater.CoralBay)[1:3, 1:3]
+
+
+#Prune the phyloseq object, so it only has the ASVs in Top200_ASVs. This will give a new phyloseq object with 200 top taxa across samples from healthy or diseased samples
+ps.SW.CoralBay_Top200ASVs <- phyloseq::prune_taxa(Top200_ASVs, ps.Counts.Seawater.CoralBay) 
+```
+
+
+```{r}
+# Using corncob and Cynthia's code on filtered top 200 taxa data
+
+# Make factors
+# ps.SW.Fishbay_Top200ASVs is the phyloseq object with the top 200 taxa across treatments 1 and 3
+sample_data(ps.SW.CoralBay_Top200ASVs)$Site_Disease <-   factor(sample_data(ps.SW.CoralBay_Top200ASVs)$Site_Disease,levels=c("Before", "After"))
+
+# Make subsets of the treatments
+ps200_BorA <- subset_samples(ps.SW.CoralBay_Top200ASVs, Site_Disease %in% c("Before", "After"))
+
+set.seed(1)
+
+# Corncob: Differential abundance test comparing T48 samples of treatments 1 and 3 by treatment
+ps.SW.CoralBay_Top200ASVs <- differentialTest(formula = ~ Site_Disease, 
+                             phi.formula = ~ Site_Disease,
+                             formula_null = ~ 1,
+                             phi.formula_null = ~ Site_Disease,
+                             test = "Wald", boot = FALSE,
+                             data = ps200_BorA,
+                             fdr_cutoff = 0.05)
+
+length(ps.SW.CoralBay_Top200ASVs$significant_taxa) #46! that's kinda big-ish number
+ps.SW.CoralBay_Top200ASVs$significant_taxa
+      #  [1] "ASV5"   "ASV7"   "ASV9"   "ASV17"  "ASV18"  "ASV24"  "ASV26"  "ASV27"  "ASV34"  "ASV35"  "ASV39"  "ASV40" 
+      # [13] "ASV49"  "ASV52"  "ASV62"  "ASV63"  "ASV88"  "ASV89"  "ASV93"  "ASV95"  "ASV101" "ASV107" "ASV125" "ASV129"
+      # [25] "ASV137" "ASV141" "ASV148" "ASV149" "ASV157" "ASV162" "ASV164" "ASV165" "ASV185" "ASV212" "ASV225" "ASV242"
+      # [37] "ASV252" "ASV261" "ASV262" "ASV265" "ASV277" "ASV368" "ASV436" "ASV450" "ASV579" "ASV827"
+plot(ps.SW.CoralBay_Top200ASVs)
+```
 
 
