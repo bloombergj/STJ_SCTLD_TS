@@ -63,6 +63,10 @@ head(otus["SW-32",])
 
 Goal: remove samples with less than 10,000 reads
 ```{r}
+
+#look at the total reads for each sample
+total_reads_per_sample <- data.frame(Sample = row.names(otus),
+                                        Reads = rowSums(otus[,]))
 keep <- rowSums(otus[,]) >= 10000
 
 removed <- rowSums(otus[,]) < 10000
@@ -167,7 +171,7 @@ ps.decontam.nozero <- filter_taxa(ps.decontam.nomitochloro, function(x) sum(x) >
         # Coral_18
         # C-116
  
- ps.decontam.filt <- ps.decontam.nozero %>%
+ ps.decontam.filt_1 <- ps.decontam.nozero %>%
     subset_samples(Sample_ID !="C-105" & 
                    Sample_ID !="Coral_18" &
                    Sample_ID !="C-116" & 
@@ -179,21 +183,31 @@ ps.decontam.nozero <- filter_taxa(ps.decontam.nomitochloro, function(x) sum(x) >
   #samples: 178
    
 
- Reads_per_sample <- as.data.frame(sample_sums(ps.decontam.filt))
- mean(Reads_per_sample$`sample_sums(ps.decontam.filt)`)  #65397.13
- sd(Reads_per_sample$`sample_sums(ps.decontam.filt)`)  #64605.68
- sum(Reads_per_sample$`sample_sums(ps.decontam.filt)`) #11640690
+ Reads_per_sample_1 <- as.data.frame(sample_sums(ps.decontam.filt_1))
+ mean(Reads_per_sample_1$`sample_sums(ps.decontam.filt_1)`)  #65397.13
+ sd(Reads_per_sample_1$`sample_sums(ps.decontam.filt_1)`)  #64605.68
+ sum(Reads_per_sample_1$`sample_sums(ps.decontam.filt_1)`) #11640690
  
+
+```
+
+ok well now I have 14 more samples that have >10,000 reads after removing contaminants and chloro/mito. One of those samples (Coral-13) has 9933 reads, which I'll keep. But I will removed the rest. I am going to use 9000 reads as a cut off in my code, so that I keep Coral-13. In the manuscript, I will say that I filtered at 10,000 reads, but kept Coral-13 as an exception. 
+```{r}
+ps.decontam.filt <- prune_samples(sample_sums(ps.decontam.filt_1) >= 9000, ps.decontam.filt_1)
+
+Reads_per_sample <- as.data.frame(sample_sums(ps.decontam.filt))
+mean(Reads_per_sample$`sample_sums(ps.decontam.filt)`)  #69736.54
+sd(Reads_per_sample$`sample_sums(ps.decontam.filt)`)  #64777.55
+sum(Reads_per_sample$`sample_sums(ps.decontam.filt)`) #11576265
+ 
+
 write.csv(Reads_per_sample, file = "Reads_per_sample.csv")
 
 MetaData_SamplesWeUse <- data.frame(sample_data(ps.decontam.filt))
 write.csv(MetaData_SamplesWeUse, file = "MetaData_SamplesWeUse.csv")
+
 ```
 
-
-
-
-I should talk to Amy about post-processing cut off for sample reads, because there are 14 more samples that have >10,000 reads.... ugh (see Reads_per_sample)
 
 
 #phyloseq obejct with coral and seawater from both sites
@@ -223,35 +237,54 @@ I should talk to Amy about post-processing cut off for sample reads, because the
 ```
 #phyloseq obejct with Coral from both sites
 ```{r}
-# ps.coral <- ps.decontam.filt %>%
-#   transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
-#   subset_samples(Sample_Type == "Coral") %>%   #subset coral samples
-#   filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
-# 
-# Coral.ord <- ordinate(ps.coral, "PCoA", "bray", trymax = 50, k =3, set.seed(18))
-# 
-# p2 = plot_ordination(ps.coral, Coral.ord, type="samples", color="Healthy_Diseased_Recovered", shape="Site") +
-#   geom_point(size = 4) 
-# 
-# 
-# p = plot_ordination(ps.coral, Coral.ord, type="samples", color="Site", shape="Site_Disease") +
-#   geom_point(size = 4) 
-# 
-# plot_ordination(ps.coral, Coral.ord , type="samples", color="Fate", shape = "Site") +
-#   geom_point(size = 4) 
-# 
-# plot_ordination(ps.coral, Coral.ord , type="samples", color="Site", shape = "Fate") +
-#   geom_point(size = 4) +
-#   facet_grid(~ Healthy_Diseased_Recovered)
-# 
-# plot_ordination(ps.coral, Coral.ord , type="samples", color="Healthy_Diseased_Recovered", shape = "Fate") +
-#   geom_point(size = 4) +
-#   facet_grid(~ Site)
-# 
-# plot_ordination(ps.coral, Coral.ord , type="samples", color="Healthy_Diseased_Recovered", shape = "Site") +
-#   geom_point(size = 4) 
+ps.coral <- ps.decontam.filt %>%
+  transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
+  subset_samples(Sample_Type == "Coral") %>%   #subset coral samples
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+Coral_ALL_metadata <- data.frame(sample_data(ps.coral))
+perm <- how(
+  blocks = Coral_ALL_metadata$Tag, # Restrict permutations within each block (Tag)
+  within = Within(type = "series")  # Keep the time series structure within each plot
+)
+perm.C <- adonis2(distance(ps.coral, method="bray") ~ Site, 
+                         data=Coral_ALL_metadata, 
+                         perm=perm)
+perm.C 
+
+# adonis2(formula = distance(ps.coral, method = "bray") ~ Site, data = Coral_ALL_metadata, permutations = perm)
+#          Df SumOfSqs      R2      F Pr(>F)
+# Site      1   0.8234 0.02739 1.7458      1
+# Residual 62  29.2421 0.97261              
+# Total    63  30.0655 1.00000 
 
 ```
+#phyloseq obejct with SW from both sites
+```{r}
+ps.seawater <- ps.decontam.filt %>%
+  transform_sample_counts(function(x) x / sum(x) ) %>%  #this makes everything in relative abundances
+  subset_samples(Sample_Type == "Seawater") %>%   #subset coral samples
+  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
+
+SW_ALL_metadata <- data.frame(sample_data(ps.seawater))
+perm <- how(
+  blocks = SW_ALL_metadata$Tag, # Restrict permutations within each block (Tag)
+  within = Within(type = "series")  # Keep the time series structure within each plot
+)
+perm.SW <- adonis2(distance(ps.seawater, method="bray") ~ Site, 
+                         data=SW_ALL_metadata, 
+                         perm=perm)
+perm.SW 
+
+# adonis2(formula = distance(ps.seawater, method = "bray") ~ Site, data = SW_ALL_metadata, permutations = perm)
+#          Df SumOfSqs      R2      F Pr(>F)
+# Site      1   1.6693 0.14629 15.251      1
+# Residual 89   9.7412 0.85371              
+# Total    90  11.4104 1.00000 
+
+```
+
+
 
 
 
@@ -305,17 +338,22 @@ plot2A <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", 
 
 
 
-
-
+#Because I have non-independence in my data, I need to account for the fact that my data are nested by colony tag (using block-level in permute) and within the tags/block, there is a time time series component. See:  https://uw.pressbooks.pub/appliedmultivariatestatistics/chapter/restricting-permutations/
 Coral_FishBay_metadata <- data.frame(sample_data(ps.coral.Fishbay))
-perm.C.FB.HDR <- adonis2(distance(ps.coral.Fishbay, method="bray") ~ Healthy_Diseased_Recovered, data=Coral_FishBay_metadata, strata=Coral_FishBay_metadata$Tag, perm=999)
+perm <- how(
+  blocks = Coral_FishBay_metadata$Tag, # Restrict permutations within each block (Tag)
+  within = Within(type = "series")  # Keep the time series structure within each plot
+)
+perm.C.FB.HDR <- adonis2(distance(ps.coral.Fishbay, method="bray") ~ Healthy_Diseased_Recovered, 
+                         data=Coral_FishBay_metadata, 
+                         perm=perm)
 perm.C.FB.HDR 
-
-
-    #      Number of permutations: 999
-    # Healthy_Diseased_Recovered  2    1.062 0.05602 1.1275  0.029 *
-    # Residual                   38   17.895 0.94398                
-    # Total                      40   18.957 1.00000      
+# adonis2(formula = distance(ps.coral.Fishbay, method = "bray") ~ Healthy_Diseased_Recovered, data = Coral_FishBay_metadata, permutations = perm)
+#                            Df SumOfSqs      R2      F Pr(>F)  
+# Healthy_Diseased_Recovered  2   1.0707 0.05965 1.1418  0.045 *
+# Residual                   36  16.8793 0.94035                
+# Total                      38  17.9500 1.00000                
+#this honestly isn't that different from the results if I just free permeate, so that makes me feel good about these results. 
 
 
 plot2B <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", color="Date") +
@@ -337,13 +375,19 @@ legend_2Date <- as_ggplot(legend_2Date)
 
 
 
-
-perm.C.FB.date <- adonis2(distance(ps.coral.Fishbay, method="bray") ~ Date, data = Coral_FishBay_metadata)
+perm <- how(
+  blocks = Coral_FishBay_metadata$Tag, # Restrict permutations within each block (Tag)
+  within = Within(type = "series")  # Keep the time series structure within each plot
+)
+perm.C.FB.date <- adonis2(distance(ps.coral.Fishbay, method="bray") ~ Date, 
+                          data = Coral_FishBay_metadata,
+                          perm=perm)
 perm.C.FB.date 
-    #          Df SumOfSqs      R2      F Pr(>F)   
-    # Date     10   5.1149 0.26982 1.1086  0.005 **
-    # Residual 30  13.8422 0.73018                 
-    # Total    40  18.9571 1.00000                    
+# adonis2(formula = distance(ps.coral.Fishbay, method = "bray") ~ Date, data = Coral_FishBay_metadata, permutations = perm)
+#          Df SumOfSqs      R2      F Pr(>F)   
+# Date     10   5.0915 0.28365 1.1087  0.005 **
+# Residual 28  12.8585 0.71635                 
+# Total    38  17.9500 1.00000                   
      
 
 plot3 <- plot_ordination(ps.coral.Fishbay, Coral.FishBay.ord , type="samples", shape ="Healthy_Diseased_Recovered", color = "Date") +
@@ -404,13 +448,19 @@ legend_2health <- as_ggplot(legend_2health)
 
 
 SW_FishBay_metadata <- data.frame(sample_data(ps.seawater.Fishbay))
-perm.SW.FB.HDR <- adonis2(distance(ps.seawater.Fishbay, method="bray") ~ Healthy_Diseased_Recovered, data=SW_FishBay_metadata, strata=SW_FishBay_metadata$Tag, perm=999)
+perm <- how(
+  blocks = SW_FishBay_metadata$Tag, # Restrict permutations within each block (Tag)
+  within = Within(type = "series")  # Keep the time series structure within each plot
+)
+perm.SW.FB.HDR <- adonis2(distance(ps.seawater.Fishbay, method="bray") ~ Healthy_Diseased_Recovered, 
+                          data=SW_FishBay_metadata, 
+                          perm=perm)
 perm.SW.FB.HDR 
 
-    #    Number of permutations: 999
-    # Healthy_Diseased_Recovered  3   0.9929 0.15519 2.5718  0.013 *
-    # Residual                   42   5.4051 0.84481                
-    # Total                      45   6.3980 1.00000    
+#                            Df SumOfSqs      R2      F Pr(>F)  
+# Healthy_Diseased_Recovered  3   0.9929 0.15519 2.5718  0.035 *
+# Residual                   42   5.4051 0.84481                
+# Total                      45   6.3980 1.00000 
 
 
 
@@ -429,14 +479,14 @@ plot2D <- plot_ordination(ps.seawater.Fishbay, SW.FishBay.ord , type="samples", 
 
 
 
-
-perm.SW.FB.date <- adonis2(distance(ps.seawater.Fishbay, method="bray") ~ Date, data = SW_FishBay_metadata, permutations = 999)
+perm.SW.FB.date <- adonis2(distance(ps.seawater.Fishbay, method="bray") ~ Date, 
+                           data = SW_FishBay_metadata, 
+                            perm=perm)
 perm.SW.FB.date 
-
-    #    Number of permutations: 999
-    # Date     10   3.2742 0.51175 3.6685  0.001 ***
-    # Residual 35   3.1238 0.48825                  
-    # Total    45   6.3980 1.00000  
+#          Df SumOfSqs      R2      F Pr(>F)   
+# Date     10   3.2742 0.51175 3.6685  0.005 **
+# Residual 35   3.1238 0.48825                 
+# Total    45   6.3980 1.00000     
 
 
 
@@ -508,14 +558,19 @@ legend_ReefHealthState <- as_ggplot(legend_ReefHealthState)
 
 
 SW_CoralBay_metadata <- data.frame(sample_data(ps.Seawater.Coralbay))
-perm.SW.CB.HDR <- adonis2(distance(ps.Seawater.Coralbay, method="bray") ~ Site_Disease, data=SW_CoralBay_metadata, strata=SW_CoralBay_metadata$Tag, perm=999)
+perm <- how(
+  blocks = SW_CoralBay_metadata$Tag, # Restrict permutations within each block (Tag)
+  within = Within(type = "series")  # Keep the time series structure within each plot
+)
+perm.SW.CB.HDR <- adonis2(distance(ps.Seawater.Coralbay, method="bray") ~ Site_Disease, 
+                          data=SW_CoralBay_metadata, 
+                          perm=perm)
 perm.SW.CB.HDR 
 
-    #       Number of permutations: 999
-    #                         Df SumOfSqs      R2      F Pr(>F)   
-    # Site_Disease  1   0.3652 0.10925 5.2738  0.001 ***
-    # Residual     43   2.9780 0.89075                  
-    # Total        44   3.3432 1.00000 
+#              Df SumOfSqs      R2      F Pr(>F)   
+# Site_Disease  1   0.3652 0.10925 5.2738  0.005 **
+# Residual     43   2.9780 0.89075                 
+# Total        44   3.3432 1.00000 
 
 
 plot1D <- plot_ordination(ps.Seawater.Coralbay, SW.CoralBay.ord , type="samples", color="Date") +
@@ -536,15 +591,19 @@ legend_Date1 <- get_plot_component(plot1D, 'guide-box-bottom', return_all = TRUE
 legend_Date1 <- as_ggplot(legend_Date1)
 
 
-
-perm.SW.CB.date <- adonis2(distance(ps.Seawater.Coralbay, method="bray") ~ Date, data = SW_CoralBay_metadata)
+perm <- how(
+  blocks = SW_CoralBay_metadata$Tag, # Restrict permutations within each block (Tag)
+  within = Within(type = "series")  # Keep the time series structure within each plot
+)
+perm.SW.CB.date <- adonis2(distance(ps.Seawater.Coralbay, method="bray") ~ Date, 
+                           data=SW_CoralBay_metadata, 
+                          perm=perm)
 perm.SW.CB.date 
 
-  #      Number of permutations: 999
-  # Date     11   2.8474 0.85168 17.227  0.001 ***
-  # Residual 33   0.4959 0.14832                  
-  # Total    44   3.3432 1.00000      
-
+#          Df SumOfSqs      R2      F Pr(>F)   
+# Date     11   2.8474 0.85168 17.227  0.005 **
+# Residual 33   0.4959 0.14832                 
+# Total    44   3.3432 1.00000  
 
 ```
 
@@ -609,17 +668,20 @@ plot1A <- plot_ordination(ps.Coral.Coralbay, Coral.CoralBay.ord , type="samples"
 
 
 
-
-
 Coral_CoralBay_metadata <- data.frame(sample_data(ps.Coral.Coralbay))
-perm.C.CB.HDR <- adonis2(distance(ps.Coral.Coralbay, method="bray") ~ Site_Disease, data=Coral_CoralBay_metadata, strata=Coral_CoralBay_metadata$Tag, perm=999)
+perm <- how(
+  blocks = Coral_CoralBay_metadata$Tag, # Restrict permutations within each block (Tag)
+  within = Within(type = "series")  # Keep the time series structure within each plot
+)
+perm.C.CB.HDR <- adonis2(distance(ps.Coral.Coralbay, method="bray") ~ Site_Disease, 
+                         data=Coral_CoralBay_metadata,
+                         perm=perm)
 perm.C.CB.HDR 
-
-  #        Number of permutations: 999
-  #              Df SumOfSqs      R2      F Pr(>F)   
-  # Site_Disease  1   0.6044 0.03696 1.2664  0.005 **
-  # Residual     33  15.7486 0.96304                 
-  # Total        34  16.3530 1.00000 
+# 
+#              Df SumOfSqs      R2     F Pr(>F)  
+# Site_Disease  1   0.5843 0.05174 1.255  0.045 *
+# Residual     23  10.7078 0.94826               
+# Total        24  11.2921 1.00000 
 
 
 
@@ -636,14 +698,15 @@ plot1B <- plot_ordination(ps.Coral.Coralbay, Coral.CoralBay.ord , type="samples"
   guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
   labs(color = "Date", tag = "B")
 
-perm.C.CB.date <- adonis2(distance(ps.Coral.Coralbay, method="bray") ~ Date, data = Coral_CoralBay_metadata)
+perm.C.CB.date <- adonis2(distance(ps.Coral.Coralbay, method="bray") ~ Date, 
+                          data = Coral_CoralBay_metadata, 
+                          perm=perm)
 perm.C.CB.date 
 
-      #    Number of permutations: 999
-      #             Df SumOfSqs      R2      F Pr(>F)  
-      # Date     10    5.272 0.32239 1.1419  0.001 ***
-      # Residual 24   11.081 0.67761                  
-      # Total    34   16.353 1.00000      
+#          Df SumOfSqs      R2      F Pr(>F)   
+# Date      9   4.6194 0.40908 1.1538  0.005 **
+# Residual 15   6.6727 0.59092                 
+# Total    24  11.2921 1.00000      
 
 ```
 
