@@ -41,7 +41,7 @@ Define the following path variable so that it points to the extracted directory 
 path <-  "~/STJ_SCTLD_TS_dada2/FastQ_Data" 
 #CHANGE ME to the directory containing the fastq files after unzipping.
 
-#TOTAL READS using "zcat *fastq.gz | echo $((`wc -l`/4))":
+#TOTAL READS using "zcat *fastq.gz | echo $((`wc -l`/4))": 39985368 reads
 ```
 
 Count the number of files
