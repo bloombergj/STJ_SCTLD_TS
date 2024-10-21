@@ -10,6 +10,10 @@ output: html_document
 setwd("~/Documents/WHOI/Projects/STJ_SCTLD_TS")
 ```
 
+Reminder for clearing environment environment: you can clear everything except for specific objects with: 
+rm(list = setdiff(ls(), c("keep_this_object", "keep_another_object")))
+
+
 ```{r}
 # For data wrangling
 library(dplyr); packageVersion("dplyr")
@@ -23,6 +27,10 @@ library(phyloseq); packageVersion("phyloseq")
 # For visualization
 library(ggplot2); packageVersion("ggplot2")
 library(randomcoloR)
+
+library(cowplot)
+library(ggplotify)
+library(ggpubr)
 
 ```
 
@@ -213,7 +221,6 @@ MetaData_SamplesWeUse <- data.frame(sample_data(ps.decontam.filt))
 write.csv(MetaData_SamplesWeUse, file = "MetaData_SamplesWeUse.csv")
 
 ```
-
 
 
 #phyloseq obejct with coral and seawater from both sites
@@ -1341,87 +1348,91 @@ rm(palette)
 
 
 ##20 most abundant AVS -- Corals from Fish Bay
+rm(list = setdiff(ls(), c("ps.decontam.filt", "ps.coral.Fishbay", "taxa")))
 ```{r}
-asv_abundance <- as.data.frame(as.matrix(otu_table(ps.coral.Fishbay)))
-  #41 obs of 3873 variables
-asv_abundance <- asv_abundance[, colSums(asv_abundance != 0) > 0]
-  #41 obs of 3873 variables 
+# Subset the phyloseq object by health category
+ps_healthy <- subset_samples(ps.coral.Fishbay, Healthy_Diseased_Recovered == "Healthy")
+ps_diseased <- subset_samples(ps.coral.Fishbay, Healthy_Diseased_Recovered == "Diseased")
+ps_recovered <- subset_samples(ps.coral.Fishbay, Healthy_Diseased_Recovered == "Recovered")
 
-# Calculate the total abundance of ASVs per sample
-sample_total_abundance <- colSums(asv_abundance)
+# Function to get top 20 ASVs based on abundance
+get_top_ASVs <- function(ps_obj, n = 20) {
+  # Aggregate ASV abundance
+  ASV_abundance <- taxa_sums(ps_obj)
+  # Sort ASVs by abundance and get top n
+  top_ASVs <- names(sort(ASV_abundance, decreasing = TRUE)[1:n])
+  return(top_ASVs)
+}
 
-# Sort the samples by total abundance in descending order
-sorted_samples <- sample_total_abundance[order(sample_total_abundance, decreasing = TRUE)]
-head(sorted_samples)
-top_20_asvs <- names(sorted_samples[1:20])
+# Get top 20 ASVs for each health category
+top_ASVs_healthy <- get_top_ASVs(ps_healthy)
+top_ASVs_diseased <- get_top_ASVs(ps_diseased)
+top_ASVs_recovered <- get_top_ASVs(ps_recovered)
 
-# Get the top 20 most abundant ASVs
-top_20_asvs_samples <- asv_abundance[, top_20_asvs]
-top_20_asvs_samples$Sample_names <- row.names(top_20_asvs_samples)
+# Combine lists and remove duplicates
+combined_top_ASVs <- unique(c(top_ASVs_healthy, top_ASVs_diseased, top_ASVs_recovered))
+length(combined_top_ASVs) #53
+
 ```
 
 ```{r}
 # Get unique values in the specified category
-meta_top20 <- META[top_20_asvs_samples$Sample_names]
-
-taxa_top20 <- as.data.frame(taxa[top_20_asvs,])
-taxa_top20$ASV_ID <- row.names(taxa_top20)
-taxa_top20 <- taxa_top20 %>% arrange(ASV_ID)
-
-write.csv(taxa_top20, "Top20_ASV_FishBay_Corals.csv")
+taxa_topASVs <- as.data.frame(taxa[combined_top_ASVs,])
+write.csv(taxa_topASVs, "Top_ASV_FishBay_Corals.csv")
  
+# Prune the phyloseq object to keep only the ASVs in combined_top_ASVs
+ps_top_ASVs <- prune_taxa(combined_top_ASVs, ps.coral.Fishbay)
 
+# Convert phyloseq object to a data frame using psmelt
+df_ps_top_ASVs <- psmelt(ps_top_ASVs)
 
-#Combine the data frames into one
-data_frame_merge <- merge(meta_top20, top_20_asvs_samples,
-                          by = 'row.names', all = TRUE)
-
-#Reshape the data into long format
-long_df_FB_coral <- data_frame_merge %>% pivot_longer(
-                    cols=starts_with("ASV"),
-                    names_to='ASV_ID',
-                    values_to='ASV_prop') %>% 
-                    arrange(ASV_ID)
-
-mean_per_sample_FB <- long_df_FB_coral %>% 
-                  group_by(Sample_ID) %>%
-                  summarise(mean = mean(ASV_prop),
-                            SD = sd(ASV_prop),
-                            sum = sum(ASV_prop))
-    # min sum =  0.003954271, max sum = 0.847322191
+mean_per_sample_FB <- df_ps_top_ASVs %>% 
+                  group_by(Sample) %>%
+                  summarise(mean = mean(Abundance),
+                            SD = sd(Abundance),
+                            sum = sum(Abundance))
+    # min sum =  0.05179833, max sum = 0.94536763
 
 total_mean_FB <- mean_per_sample_FB %>%
               summarise(mean = mean(sum),
                         SD = sd(sum))
-    # mean = 0.2762619, SD = 0.2591617
+    # mean = 0.4297116, SD = 0.257606
 
 
+n <- 53 #plug that number in here to a get that number of unique colors to plot
+set.seed(15)
+palette <- distinctColorPalette(n)
+#pie(rep(1, n), col=palette)
 
-palette20 <- c("#C5EC8A",  "#6EB3EB",  "#4CEADD", "#ECF143", "#C571D9", "#962BEF"  , "#DFA643",    "#E64A8A", "#55AE62", "#E45F4E", "#E17FAD", "#61E97D", "#E9D2A9", "#6B6E7F", "#E33EE6", "#ACAA51", "#A5D4E8",  "#BC9DE1",  "#6765F0", "#B99299")
 
-
-
-
-
-ggplot(long_df_FB_coral, aes(x=Date, y=ASV_prop, fill=ASV_ID)) + 
+plot <- ggplot(df_ps_top_ASVs, aes(x=Date, y=Abundance, fill=OTU)) + 
   geom_bar(stat="identity", position="stack") + 
   facet_grid(~Tag, scale="free") +
-  scale_fill_manual(values=palette20) +
+  scale_fill_manual(values=palette) +
   theme(text = element_text(size=16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
-  labs(title = "Top 20 ASVs from Corals from Fish Bay") +
+  labs(title = "Top 20 ASVs from Corals from each health category from Fish Bay") +
   xlab(" ")
 #%#%#%#%
 
+#get the plot without the legend
+plot + theme(legend.position = "none")
+
+#get the legend without the plot
+legend_topASVs <- get_legend(plot)
+legend <- as.ggplot(legend_topASVs)
+
+
 
 ```
-Top20ASVsfromCoralsfromFishBay
-
+Barplot_TopASVs_Coral_FishBay
+Barplot_Legend_TopASVs_Coral_FishBay
 
 
 
 
 
 ##20 most abundant AVS  -- Seawater from Fish Bay
+rm(list = setdiff(ls(), c("ps.decontam.filt", "ps.seawater.Fishbay", "taxa")))
 ```{r}
 asv_abundance <- as.data.frame(as.matrix(otu_table(ps.seawater.Fishbay)))
   #46 obs of 7023 variables
