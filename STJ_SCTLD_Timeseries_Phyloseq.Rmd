@@ -1547,48 +1547,21 @@ Prevelance_ForAnalyses$Date_nice <- as.Date(Prevelance_ForAnalyses$Date) #make g
 
 unique(Prevelance_ForAnalyses$Date_nice)
 
-ggplot()+
-  geom_point(data=Prevelance_ForAnalyses, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, color="Red") +
-  geom_smooth(data=Prevelance_ForAnalyses, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, method = loess, color="Red", se = FALSE) +
-  scale_y_continuous(name = "SCTLD Prevelance (percent)") +
-  xlab("Date") +
-  theme(text=element_text(size=13)) +
-  ggtitle("SCTLD Prevelance combined") 
+prev_fishbay <- subset(Prevelance_ForAnalyses, Site == "Fish_Bay")
+prev_coralbay <- subset(Prevelance_ForAnalyses, Site == "Coral_Bay")
 
 #For Loess:
 #default span is α = 0.75
 
-
-prev_fishbay <- subset(Prevelance_ForAnalyses, Site == "Fish_Bay")
-plot_FB <- ggplot()+
-  geom_point(data=prev_fishbay, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, color="red3", size = 4) +
-  geom_smooth(data=prev_fishbay, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, method = loess, color="red3", se = FALSE, size=2) +
-  scale_y_continuous(name = "SCTLD Prevelance (percent)") +
+ggplot()+
+  geom_point(data=prev_fishbay, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, color="firebrick2", size = 4) +
+  geom_smooth(data=prev_fishbay, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, method = loess, color="firebrick2", se = FALSE, size=2) +
+  geom_point(data=prev_coralbay, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, color="firebrick4", size = 4) +
+  geom_smooth(data=prev_coralbay, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, method = loess, color="firebrick4", se = FALSE, size=2) +
+  scale_y_continuous(name = "SCTLD prevalence (percent)") +
   xlab("") +
-  labs(tag = "B") +
   theme_classic() +
-  theme(text=element_text(size=16))+
-  ggtitle("Fish Bay") 
-
-
-prev_coralbay <- subset(Prevelance_ForAnalyses, Site == "Coral_Bay")
-plot_CB <- ggplot()+
-  geom_point(data=prev_coralbay, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, color="red3", size = 4) +
-  geom_smooth(data=prev_coralbay, aes(x = Date_nice, y=Prev_Percent), na.rm = TRUE, method = loess, color="red3", se = FALSE, size=2) +
-  scale_y_continuous(name = "SCTLD Prevelance (percent)") +
-  xlab("") +
-  labs(tag = "A") +
-  theme_classic() +
-  theme(text=element_text(size=16))+
-  ggtitle("Coral Bay") 
-
-
-plot_grid(plot_CB, 
-          plot_FB, 
-          ncol = 2, nrow = 1, 
-          align = 'h', 
-          rel_widths = c(1, 1))
-
+  theme(text=element_text(size=16))
 ```
 
 
@@ -2396,114 +2369,23 @@ result <- data.frame(
 
 
 
-#Differentail abundance
-This is based on code from Mallory, which she modified from Cynthia's code.
-
-First, I will make a phyloseq object with only healthy and diseased samples, because differential abundance is only done on two factors at a time.
-
-###Healthy or diseased: Seawater from Fish Bay 
-rm(list = setdiff(ls(), c("ps.decontam.filt", "ps.seawater.Fishbay")))
-```{r}
-#Make a Seawater from Fish Bay phyloseq object with count data, not relative abundance
-#subset the phyloseq object to just data for healthy or diseased corals (no dead)
-#subset the phyloseq object to only have epidemic corals
-ps.Counts.Seawater.Fishbay <- ps.decontam.filt %>%
-  subset_samples(Sample_Type == "Seawater") %>% #subset coral samples
-  subset_samples(Site == "Fish_Bay") %>%
-  subset_taxa(Family !="Mitochondria" & Order !="Chloroplast") %>% 
-  subset_samples(Healthy_or_Diseased != "Dead") %>% #remove dead samples
-  subset_samples(Disease_Phase == "Epidemic") %>%
-  filter_taxa(function(x) sum(x) > 0, TRUE) #remove ASVS with all zeros
-
-
-#add a column to the meta data for the number of days since the first sampling date
-meta_data <- sample_data(ps.Counts.Seawater.Fishbay)
-meta_data$Days_Since_First <- as.numeric(as.Date(meta_data$Date) - as.Date("2020-07-16")) 
-sample_data(ps.Counts.Seawater.Fishbay) <- meta_data
-rm(meta_data)
-
-#double check that worked
-meta_temp <- sample_data(ps.Counts.Seawater.Fishbay) 
-rm(meta_temp)
-str(sample_data(ps.Counts.Seawater.Fishbay)$Days_Since_First)
-
-#Double check that this is count data
-otu_table(ps.Counts.Seawater.Fishbay)[1:3, 1:3]
-```
-
-```{r}
-# Make factors --> not sure if necessary in this scenario 
-sample_data(ps.Counts.Seawater.Fishbay)$Healthy_or_Diseased <-   factor(sample_data(ps.Counts.Seawater.Fishbay)$Healthy_or_Diseased,levels=c("Healthy", "Diseased"))
-
-# Corncob: Differential abundance test 
-set.seed(1)
-DA.seawater.epidemic <- differentialTest(formula = ~ Healthy_or_Diseased + Tag + Days_Since_First, 
-                             phi.formula = ~ Healthy_or_Diseased + Tag + Days_Since_First,
-                             formula_null = ~ Tag + Days_Since_First,
-                             phi.formula_null = ~ Healthy_or_Diseased + Tag + Days_Since_First,
-                             test = "Wald", boot = FALSE,
-                             data = ps.Counts.Seawater.Fishbay,
-                             fdr_cutoff = 0.1)
-DA.seawater.epidemic$significant_taxa
-length(DA.seawater.epidemic$significant_taxa) #89
-#  [1] "ASV2"    "ASV4"    "ASV5"    "ASV7"    "ASV8"    "ASV9"    "ASV10"   "ASV12"   "ASV13"   "ASV18"   "ASV19"   "ASV23"  
-# [13] "ASV24"   "ASV25"   "ASV27"   "ASV28"   "ASV31"   "ASV32"   "ASV33"   "ASV35"   "ASV36"   "ASV39"   "ASV40"   "ASV44"  
-# [25] "ASV46"   "ASV49"   "ASV64"   "ASV65"   "ASV71"   "ASV72"   "ASV73"   "ASV80"   "ASV81"   "ASV82"   "ASV88"   "ASV90"  
-# [37] "ASV95"   "ASV100"  "ASV101"  "ASV113"  "ASV114"  "ASV115"  "ASV120"  "ASV121"  "ASV124"  "ASV126"  "ASV149"  "ASV154" 
-# [49] "ASV157"  "ASV161"  "ASV168"  "ASV172"  "ASV178"  "ASV180"  "ASV188"  "ASV190"  "ASV194"  "ASV207"  "ASV212"  "ASV218" 
-# [61] "ASV236"  "ASV237"  "ASV249"  "ASV258"  "ASV260"  "ASV261"  "ASV262"  "ASV297"  "ASV325"  "ASV328"  "ASV330"  "ASV339" 
-# [73] "ASV353"  "ASV362"  "ASV372"  "ASV374"  "ASV379"  "ASV383"  "ASV388"  "ASV413"  "ASV420"  "ASV449"  "ASV510"  "ASV518" 
-# [85] "ASV530"  "ASV802"  "ASV902"  "ASV905"  "ASV1119"
-plot(DA.seawater.epidemic) # a bunch positive and negative
-  #12 positive, 9 have 95% confidence interval that don't cross zero
-
-
-extractmods2 <- function(model) {
-  result <- data.frame("Estimate" = model$coefficients[2, 1], 
-                        "Std.Error" = model$coefficients[2, 2], 
-                        "p" = model$coefficients[2, 4])
-  return(result)
-}
-
-# save the output and add asv, p.adj values to it and make it into a data frame
-da.models <- lapply(DA.seawater.epidemic$significant_models, extractmods2)
-names(da.models) <- DA.seawater.epidemic$significant_taxa
-sig_taxa <- map2_dfr(names(da.models), da.models, ~data.frame(
-                      ASV = .x,
-                      Estimate = .y$Estimate,
-                      Std.Error = .y$Std.Error,
-                      p = .y$p
-                    ))
-#pull out the taxa with positive differential abundance
-all_positive_sig_df <- sig_taxa %>% filter(Estimate > 0)
-length(all_positive_sig_df$ASV) #12
-#I am going to just manually remove the taxa whose 95% confident intervals overlap with zero (73, 388, 449)
-positive_sig_df <- all_positive_sig_df %>% filter(!ASV %in% c("ASV73", "ASV388", "ASV449"))
-length(positive_sig_df$ASV) #9 
-
-```
-
-
-
 
 #ASVs over time
 ##Seawater from Fish Bay
 ```{r}
 #clean up environment
-rm(list = setdiff(ls(), c("ps.decontam.filt", "ps.seawater.Fishbay", "ps.Seawater.Coralbay", "positive_sig_df", "asv_abundance")))
+rm(list = setdiff(ls(), c("ps.decontam.filt", "ps.seawater.Fishbay", "ps.Seawater.Coralbay", "asv_abundance")))
 
 asv_abundance <- as.data.frame(as.matrix(otu_table(ps.seawater.Fishbay)))
  #46 obs of 7023 variables
 meta_forBubble <- sample_data(ps.seawater.Fishbay)
-
-ASVofInterst <- positive_sig_df[,1]
-ASVofInterst <- c("ASV2", ASVofInterst)
+ASVofInterst <- c("ASV1", "ASV5", "ASV45", "ASV67", "ASV79", "ASV84")
 asv_abun_ofInterest <- asv_abundance[, ASVofInterst]
 asv_abun_ofInterest$Sample_names <- row.names(asv_abun_ofInterest)
 
 combo_data <- cbind(asv_abun_ofInterest, meta_forBubble)
 
-colNeeded <- c("ASV2", "ASV65", "ASV72", "ASV120", "ASV194", "ASV260", "ASV297", "ASV379", "ASV383", "ASV530", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered")
+colNeeded <- c("ASV1", "ASV5", "ASV45", "ASV67", "ASV79", "ASV84", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered")
 combo_data <- combo_data[,colNeeded]
 ```
 
@@ -2525,26 +2407,27 @@ ggplot(combo_data_forplotting, aes(x = Date, y = RelativeAbundance, color = ASV,
   theme(
     text = element_text(size = 16),
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
-    scale_color_manual(breaks=c("ASV2", "ASV65", "ASV72", "ASV120", "ASV194", "ASV260", "ASV297", "ASV379", "ASV383", "ASV530"), values = c( "#996FD2", "darkgoldenrod3", "darkgreen", "#DB7BB2", "chartreuse3", "deeppink3", "darkorange3", "cornsilk4", "blue3", "cyan3")) 
+    scale_color_manual(breaks=c("ASV1", "ASV5", "ASV45", "ASV67", "ASV79", "ASV84"), values = c("#009E73", "#996FD2", "#CC79A7", "#D55E00", "#0072B2", "#E69F00"))
+
 
 ```
 
 ##Seawater from Coral Bay
 ```{r}
 #clean up environment
-rm(list = setdiff(ls(), c("ps.decontam.filt", "ps.seawater.Fishbay", "ps.Seawater.Coralbay", "positive_sig_df", "asv_abundance")))
+rm(list = setdiff(ls(), c("ps.decontam.filt", "ps.seawater.Fishbay", "ps.Seawater.Coralbay", "asv_abundance")))
 
 asv_abundance <- as.data.frame(as.matrix(otu_table(ps.Seawater.Coralbay)))
  #45 obs of 9158 variables
 meta_forBubble <- sample_data(ps.Seawater.Coralbay)
 
-ASVofInterst <- c("ASV2", "ASV65", "ASV72", "ASV120", "ASV194", "ASV260", "ASV297", "ASV379", "ASV383", "ASV530")
+ASVofInterst <- c("ASV1", "ASV5", "ASV45", "ASV67", "ASV79", "ASV84")
 asv_abun_ofInterest <- asv_abundance[, ASVofInterst]
 asv_abun_ofInterest$Sample_names <- row.names(asv_abun_ofInterest)
 
 combo_data <- cbind(asv_abun_ofInterest, meta_forBubble)
 
-colNeeded <- c("ASV2", "ASV65", "ASV72", "ASV120", "ASV194", "ASV260", "ASV297", "ASV379", "ASV383", "ASV530", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered", "Site_Disease")
+colNeeded <- c("ASV1", "ASV5", "ASV45", "ASV67", "ASV79", "ASV84", "Sample_names", "Site", "Tag", "Date", "Sample_Type", "Healthy_Diseased_Recovered", "Site_Disease")
 combo_data <- combo_data[,colNeeded]
 ```
 
@@ -2567,8 +2450,7 @@ ggplot(combo_data_forplotting, aes(x = Date, y = RelativeAbundance, color = ASV,
   theme(
     text = element_text(size = 16),
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
-    scale_color_manual(breaks=c("ASV2", "ASV65", "ASV72", "ASV120", "ASV194", "ASV260", "ASV297", "ASV379", "ASV383", "ASV530"), values = c( "#996FD2", "darkgoldenrod3", "darkgreen", "#DB7BB2", "chartreuse3", "deeppink3", "darkorange3", "cornsilk4", "blue3", "cyan3")) 
-
+    scale_color_manual(breaks=c("ASV1", "ASV5", "ASV45", "ASV67", "ASV79", "ASV84"), values = c("#009E73", "#996FD2", "#CC79A7", "#D55E00", "#0072B2", "#E69F00"))
 ```
 
 
